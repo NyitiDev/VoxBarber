@@ -1,0 +1,358 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		184FC06E202686499B591F75 /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE874370C23A156E0B0B4480 /* WaveformView.swift */; };
+		2872EF6E6FD677F558150504 /* TimeRulerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC31881A323E8F917E67FFE /* TimeRulerView.swift */; };
+		2D47FC7BB0A3009B73C67B2E /* voxbarber_logo.png in Resources */ = {isa = PBXBuildFile; fileRef = 448E4796E64A62C914B36AF6 /* voxbarber_logo.png */; };
+		37AA0A8F61061C8B2F471918 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 938BF459A3001756C1EE9730 /* Assets.xcassets */; };
+		5531C8C8A442E6FAE2230E57 /* Buttons.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3E93EDFAEA5AD5855CE2681 /* Buttons.swift */; };
+		5711527CB045808E54F123E0 /* AudioDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C7B58C6413841DFEB8E649 /* AudioDocument.swift */; };
+		5F284D0B7C70F231EEE65F51 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFB5D4D05B9D22F145CC4967 /* AppDelegate.swift */; };
+		839AEEC0F2D28BCED1CB71FD /* MainWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B3BCBD7709B856AA3378B25 /* MainWindowController.swift */; };
+		899C2230DB05A16A789FA71E /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F514F6D934087CA5CA4F28 /* AppColors.swift */; };
+		8DA929607D09173433D3D934 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E85A189548E84F58C5A2DCC4 /* AudioEngine.swift */; };
+		AAF95E5E6517B95890084AAE /* EditOperations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 309870F130241A21D84D8E19 /* EditOperations.swift */; };
+		B47A6421AC0B742DEBDA42FB /* AudioTrackPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 189CD2E81E87BB2BC0396AF8 /* AudioTrackPanel.swift */; };
+		C2DABF221DB959AD0C359598 /* SplashWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADBAB7E0FB5197C893349B08 /* SplashWindowController.swift */; };
+		DEA0819F3B2BC82E7A13EEF9 /* ExportManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE42E29BDF78AE1F194099C1 /* ExportManager.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		189CD2E81E87BB2BC0396AF8 /* AudioTrackPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTrackPanel.swift; sourceTree = "<group>"; };
+		309870F130241A21D84D8E19 /* EditOperations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditOperations.swift; sourceTree = "<group>"; };
+		448E4796E64A62C914B36AF6 /* voxbarber_logo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = voxbarber_logo.png; sourceTree = "<group>"; };
+		4B3BCBD7709B856AA3378B25 /* MainWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowController.swift; sourceTree = "<group>"; };
+		5DC31881A323E8F917E67FFE /* TimeRulerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeRulerView.swift; sourceTree = "<group>"; };
+		89DA506AA5FBAE2DD64DAF4C /* VoxBarber.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoxBarber.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		92F514F6D934087CA5CA4F28 /* AppColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColors.swift; sourceTree = "<group>"; };
+		938BF459A3001756C1EE9730 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		96210C660EA32EA1BAAE6CC0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		A3E93EDFAEA5AD5855CE2681 /* Buttons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Buttons.swift; sourceTree = "<group>"; };
+		ADBAB7E0FB5197C893349B08 /* SplashWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashWindowController.swift; sourceTree = "<group>"; };
+		B4C7B58C6413841DFEB8E649 /* AudioDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDocument.swift; sourceTree = "<group>"; };
+		BE42E29BDF78AE1F194099C1 /* ExportManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportManager.swift; sourceTree = "<group>"; };
+		CFB5D4D05B9D22F145CC4967 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		E85A189548E84F58C5A2DCC4 /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
+		FE874370C23A156E0B0B4480 /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		00C55AC31C72315920C4B1D0 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				938BF459A3001756C1EE9730 /* Assets.xcassets */,
+				448E4796E64A62C914B36AF6 /* voxbarber_logo.png */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		36D1ECCFF4FF5586F2FBDDF5 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				89DA506AA5FBAE2DD64DAF4C /* VoxBarber.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		99EF7F4D02902BC69585F5C9 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				92F514F6D934087CA5CA4F28 /* AppColors.swift */,
+				CFB5D4D05B9D22F145CC4967 /* AppDelegate.swift */,
+				B4C7B58C6413841DFEB8E649 /* AudioDocument.swift */,
+				E85A189548E84F58C5A2DCC4 /* AudioEngine.swift */,
+				189CD2E81E87BB2BC0396AF8 /* AudioTrackPanel.swift */,
+				A3E93EDFAEA5AD5855CE2681 /* Buttons.swift */,
+				309870F130241A21D84D8E19 /* EditOperations.swift */,
+				BE42E29BDF78AE1F194099C1 /* ExportManager.swift */,
+				96210C660EA32EA1BAAE6CC0 /* Info.plist */,
+				4B3BCBD7709B856AA3378B25 /* MainWindowController.swift */,
+				ADBAB7E0FB5197C893349B08 /* SplashWindowController.swift */,
+				5DC31881A323E8F917E67FFE /* TimeRulerView.swift */,
+				FE874370C23A156E0B0B4480 /* WaveformView.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		A6546F6647A1A9036C7854A3 = {
+			isa = PBXGroup;
+			children = (
+				00C55AC31C72315920C4B1D0 /* Resources */,
+				99EF7F4D02902BC69585F5C9 /* Sources */,
+				36D1ECCFF4FF5586F2FBDDF5 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		E27833C1393D74904C8654F9 /* VoxBarber */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8AC9C49502B226326806CD1C /* Build configuration list for PBXNativeTarget "VoxBarber" */;
+			buildPhases = (
+				38E9542F7FD61D8694A90B75 /* Sources */,
+				8A0C413377E095AD30D3FABB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = VoxBarber;
+			packageProductDependencies = (
+			);
+			productName = VoxBarber;
+			productReference = 89DA506AA5FBAE2DD64DAF4C /* VoxBarber.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		225E1F6068E22BA3D32B703C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					E27833C1393D74904C8654F9 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = BDFE68E7E3C57B667944706E /* Build configuration list for PBXProject "VoxBarber" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = A6546F6647A1A9036C7854A3;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 36D1ECCFF4FF5586F2FBDDF5 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E27833C1393D74904C8654F9 /* VoxBarber */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8A0C413377E095AD30D3FABB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				37AA0A8F61061C8B2F471918 /* Assets.xcassets in Resources */,
+				2D47FC7BB0A3009B73C67B2E /* voxbarber_logo.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		38E9542F7FD61D8694A90B75 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				899C2230DB05A16A789FA71E /* AppColors.swift in Sources */,
+				5F284D0B7C70F231EEE65F51 /* AppDelegate.swift in Sources */,
+				5711527CB045808E54F123E0 /* AudioDocument.swift in Sources */,
+				8DA929607D09173433D3D934 /* AudioEngine.swift in Sources */,
+				B47A6421AC0B742DEBDA42FB /* AudioTrackPanel.swift in Sources */,
+				5531C8C8A442E6FAE2230E57 /* Buttons.swift in Sources */,
+				AAF95E5E6517B95890084AAE /* EditOperations.swift in Sources */,
+				DEA0819F3B2BC82E7A13EEF9 /* ExportManager.swift in Sources */,
+				839AEEC0F2D28BCED1CB71FD /* MainWindowController.swift in Sources */,
+				C2DABF221DB959AD0C359598 /* SplashWindowController.swift in Sources */,
+				2872EF6E6FD677F558150504 /* TimeRulerView.swift in Sources */,
+				184FC06E202686499B591F75 /* WaveformView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		38A6C1BC1AFDD536682827C0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = VoxBarber;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		5E93D5220882186F7BF081EB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.voxbarber.VoxBarber;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		5F808E8CD69321D954ADD3EB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = VoxBarber;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		F5B84C1C90817B43BF252E0D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.voxbarber.VoxBarber;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8AC9C49502B226326806CD1C /* Build configuration list for PBXNativeTarget "VoxBarber" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F5B84C1C90817B43BF252E0D /* Debug */,
+				5E93D5220882186F7BF081EB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BDFE68E7E3C57B667944706E /* Build configuration list for PBXProject "VoxBarber" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5F808E8CD69321D954ADD3EB /* Debug */,
+				38A6C1BC1AFDD536682827C0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 225E1F6068E22BA3D32B703C /* Project object */;
+}
