@@ -19,16 +19,25 @@ final class WaveformView: NSView {
     private var scrollOffsetSec: Double = 0      // látható ablak kezdete (másodperc)
     private var storedSampleRate: Double = 44100
     private var storedFrameCount: Int    = 0
-    private var cachedImage:     CGImage?
-    private var renderTask:      Task<Void, Never>?
-    private var cursorFrame:     Int = -1          // -1 = rejtett
+    private var cachedImage:        CGImage?
+    private var cachedScrollOffset:  Double = 0      // melyik offsetre lett renderelve a cachedImage
+    private var renderTask:          Task<Void, Never>?
+    private var debounceTask:        Task<Void, Never>?
+    private var cursorFrame:         Int = -1         // -1 = rejtett
+    private var markerFrames:        [Int] = []       // jelölőpontok frame-pozíciói
+    private var markerNames:         [String] = []    // jelölőpontok nevei (frame-ekkel azonos sorrendben)
 
     // Drag (panning) állapot
     private var dragAnchorX:      CGFloat = 0
     private var dragAnchorOffset: Double  = 0
+    private var didDrag:          Bool    = false   // panning történt-e (vs. tiszta kattintás)
 
     /// Scroll-esemény értesítő: az új offset másodpercben.
     var onScrollOffsetChanged: ((Double) -> Void)?
+
+    /// Kattintás-esemény értesítő: a kattintott pozíció frame-ben.
+    /// Csak akkor hívódik, ha a felhasználó kattintott (nem húzott).
+    var onSeek: ((Int) -> Void)?
 
     /// Az aktuális scroll offset (másodperc) – olvasható kívülről.
     var currentScrollOffset: Double { scrollOffsetSec }
@@ -36,6 +45,13 @@ final class WaveformView: NSView {
     /// Beállítja a lejátszási kurzor frame-pozícióját. -1 = rejtett.
     func setCursorFrame(_ frame: Int) {
         cursorFrame  = frame
+        needsDisplay = true
+    }
+
+    /// Beállítja a kirajzolandó jelölőpontok frame-pozícióit és neveit.
+    func setMarkerFrames(_ frames: [Int], names: [String] = []) {
+        markerFrames = frames
+        markerNames  = names
         needsDisplay = true
     }
 
@@ -63,9 +79,21 @@ final class WaveformView: NSView {
     }
 
     /// Scroll offset beállítása kívülről (callback nélkül – szinkronizáláshoz).
+    /// Azonnali vizuális eltolás a cached képen; 80ms inaktivitás után teljes újrarender.
     func setScrollOffset(_ sec: Double) {
         scrollOffsetSec = sec
-        scheduleRender()
+        needsDisplay = true
+        scheduleDebouncedRender()
+    }
+
+    /// Elhalasztott render: 80ms inaktivitás után indít teljes újrarajzolást.
+    private func scheduleDebouncedRender() {
+        debounceTask?.cancel()
+        debounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard !Task.isCancelled else { return }
+            self?.scheduleRender()
+        }
     }
 
     // MARK: – Scroll segédfüggvények
@@ -109,16 +137,67 @@ final class WaveformView: NSView {
         // Háttér
         ctx.setFillColor(CGColor(red: 0.09, green: 0.09, blue: 0.11, alpha: 1.0))
         ctx.fill(bounds)
-        if let img = cachedImage {
-            // CGImage y=0 = alul; NSView isFlipped=true esetén tükrözni kell
+        if let img = cachedImage, let (_, visible, _) = totalAndVisible() {
+            // Pixel-eltolás: a cached kép a cachedScrollOffset-re lett renderelve.
+            // Ha azóta scrolloztunk, toljuk el a képet – azonnali, render nélkül.
+            let pps        = Double(bounds.width) / visible
+            let pixelShift = CGFloat((scrollOffsetSec - cachedScrollOffset) * pps)
             ctx.saveGState()
             ctx.translateBy(x: 0, y: bounds.height)
             ctx.scaleBy(x: 1, y: -1)
-            ctx.draw(img, in: CGRect(origin: .zero, size: bounds.size))
+            ctx.draw(img, in: CGRect(x: -pixelShift, y: 0,
+                                     width: bounds.width, height: bounds.height))
             ctx.restoreGState()
         }
+        // Jelölőpontok overlay (a kurzor alatt)
+        drawMarkers(ctx: ctx)
         // Lejátszási kurzor overlay
         drawCursor(ctx: ctx)
+    }
+
+    /// Kirajzolja a jelölőpontokat feltűnő függőleges vonalakkal (a kurzortól
+    /// eltérő színnel). Minden vonal a saját frame-pozíciójánál jelenik meg, ha
+    /// a látható tartományba esik.
+    private func drawMarkers(ctx: CGContext) {
+        guard storedSampleRate > 0, storedFrameCount > 0, bounds.width > 1 else { return }
+        let totalDuration   = Double(storedFrameCount) / storedSampleRate
+        let visibleDuration = totalDuration / max(1.0, currentZoom)
+        guard visibleDuration > 0 else { return }
+
+        ctx.setStrokeColor(CGColor(red: 0.0, green: 0.95, blue: 0.55, alpha: 0.95))
+        ctx.setLineWidth(2.0)
+        let markerColor = NSColor(red: 0.0, green: 0.95, blue: 0.55, alpha: 1.0)
+        let labelAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9, weight: .medium),
+            .foregroundColor: markerColor
+        ]
+        for (index, frame) in markerFrames.enumerated() {
+            let sec    = Double(frame) / storedSampleRate
+            let relSec = sec - scrollOffsetSec
+            guard relSec >= 0, relSec <= visibleDuration else { continue }
+            let x = CGFloat(relSec / visibleDuration) * bounds.width
+            ctx.setStrokeColor(markerColor.cgColor)
+            ctx.setLineWidth(2.0)
+            ctx.move(to: CGPoint(x: x, y: 0))
+            ctx.addLine(to: CGPoint(x: x, y: bounds.height))
+            ctx.strokePath()
+
+            // Név a vonal mellett, a hanghullám tetején, kicsi betűkkel.
+            if index < markerNames.count {
+                let name = markerNames[index]
+                if !name.isEmpty {
+                    let attr = NSAttributedString(string: name, attributes: labelAttrs)
+                    let textSize = attr.size()
+                    // A vonaltól jobbra, de ha kilógna a jobb szélen, akkor balra.
+                    var textX = x + 3
+                    if textX + textSize.width > bounds.width {
+                        textX = x - 3 - textSize.width
+                    }
+                    let textY: CGFloat = 2  // felül (flipped koordináta)
+                    attr.draw(at: CGPoint(x: textX, y: textY))
+                }
+            }
+        }
     }
 
     private func drawCursor(ctx: CGContext) {
@@ -173,8 +252,10 @@ final class WaveformView: NSView {
             )
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
-                self?.cachedImage = image
-                self?.needsDisplay = true
+                guard let self else { return }
+                self.cachedImage = image
+                self.cachedScrollOffset = scrollOffset  // feljegyezzük, melyik offsetre szól
+                self.needsDisplay = true
             }
         }
     }
@@ -186,11 +267,13 @@ final class WaveformView: NSView {
     override func mouseDown(with event: NSEvent) {
         // Fokusz + előtér kezelés a szülőpanelnek
         nextResponder?.mouseDown(with: event)
-        guard currentZoom > 1.0 else { return }
+        didDrag = false
         let loc = convert(event.locationInWindow, from: nil)
         dragAnchorX      = loc.x
         dragAnchorOffset = scrollOffsetSec
-        NSCursor.closedHand.push()
+        if currentZoom > 1.0 {
+            NSCursor.closedHand.push()
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -200,6 +283,8 @@ final class WaveformView: NSView {
             return
         }
         let loc        = convert(event.locationInWindow, from: nil)
+        // Drag-küszöb: 3px-nél nagyobb elmozdulás már panningnek számít
+        if abs(loc.x - dragAnchorX) > 3 { didDrag = true }
         let deltaPixels = Double(loc.x - dragAnchorX)
         // Jobbra húzás = korábbi rész felé görgetés (offset csökken)
         let deltaSec   = -deltaPixels / pps
@@ -207,14 +292,37 @@ final class WaveformView: NSView {
         let newOffset  = max(0.0, min(dragAnchorOffset + deltaSec, maxOffset))
         if newOffset != scrollOffsetSec {
             scrollOffsetSec = newOffset
-            scheduleRender()
+            needsDisplay = true                  // azonnali pixel-shift, render nélkül
+            scheduleDebouncedRender()            // teljes render csak 80ms inaktivitás után
             onScrollOffsetChanged?(scrollOffsetSec)
         }
     }
 
     override func mouseUp(with event: NSEvent) {
         if currentZoom > 1.0 { NSCursor.pop() }
+        // Tiszta kattintás (nem panning) → seek a kattintott pozícióra
+        if !didDrag {
+            let loc = convert(event.locationInWindow, from: nil)
+            if let frame = frameAt(x: loc.x) {
+                onSeek?(frame)
+            }
+        } else {
+            // Drag vége: azonnal pontos render, ne kelljen várni a debounce-ra
+            debounceTask?.cancel()
+            scheduleRender()
+        }
         super.mouseUp(with: event)
+    }
+
+    /// A nézet x-koordinátájához tartozó frame-pozíciót adja vissza (teljes pufferben).
+    private func frameAt(x: CGFloat) -> Int? {
+        guard storedSampleRate > 0, storedFrameCount > 0, bounds.width > 1 else { return nil }
+        let totalDuration   = Double(storedFrameCount) / storedSampleRate
+        let visibleDuration = totalDuration / max(1.0, currentZoom)
+        let clampedX        = max(0, min(bounds.width, x))
+        let sec             = scrollOffsetSec + Double(clampedX / bounds.width) * visibleDuration
+        let frame           = Int(sec * storedSampleRate)
+        return max(0, min(storedFrameCount, frame))
     }
 
     override func resetCursorRects() {

@@ -85,6 +85,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             keyEquivalent: "s"))
         fileMenu.addItem(.separator())
         fileMenu.addItem(NSMenuItem(
+            title: "Jelölőpontok betöltése…",
+            action: #selector(loadMarkers),
+            keyEquivalent: ""))
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(NSMenuItem(
             title: "Kilépés",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"))
@@ -110,6 +115,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         editMenu.addItem(NSMenuItem(
             title: "Töröl",
             action: #selector(deleteAudio),
+            keyEquivalent: ""))
+        editMenu.addItem(.separator())
+        editMenu.addItem(NSMenuItem(
+            title: "Új jelölőpont",
+            action: #selector(addMarker),
+            keyEquivalent: "m"))
+        editMenu.addItem(NSMenuItem(
+            title: "Jelölőpontok listája",
+            action: #selector(showMarkersList),
             keyEquivalent: ""))
 
         // ── Lejátszás menü ───────────────────────────────────────────────
@@ -268,6 +282,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         panel.audioBuffer = panel.audioBuffer.deleting(from: range.start, to: range.end)
         panel.selectionRange = nil
     }
+    @objc private func addMarker() {
+        DocumentPanelView.focused?.addMarkerAtCursor()
+    }
+    @objc private func showMarkersList() {
+        DocumentPanelView.focused?.showMarkersList()
+    }
+    @objc private func loadMarkers() {
+        DocumentPanelView.focused?.loadMarkersFromMenu()
+    }
 
     // MARK: – Menü validáció
 
@@ -287,12 +310,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // Fájl
         case #selector(saveAudioFile):
             return hasPanel
+        case #selector(loadMarkers):
+            return hasPanel
 
         // Szerkesztés
         case #selector(copyAudio), #selector(cutAudio), #selector(deleteAudio):
             return hasSelection
         case #selector(pasteAudio):
             return hasPanel && AudioClipboard.shared.hasContent
+        case #selector(addMarker):
+            return hasPanel
+        case #selector(showMarkersList):
+            return hasPanel
 
         // Lejátszás
         case #selector(playFromStart), #selector(playFromCursor):

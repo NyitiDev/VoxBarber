@@ -16,15 +16,17 @@ kezelőfelület:
 Az app egy nyitó képernyővel indít. Ez egy kisméretű (800x600 pixel) ablak, amin a voxbarber_logo.png kép van, az alján egy START gomb, ami bezárja ezt az ablakot és a főképernyőre navigál. Az ablak nem méretezhető, de mozgatható, a kép az ablakhoz van igazítva.
 Az app főképernyője egy 1200x800 pixeles ablak, amennyiben az OS ezt nem engedi, akkor a legnagyobb mérteben, ami lehetséges. A főképernyő átméretezhető, mozgatható.
 Az app menüje: 
-Fájl menü » Új hangfájl, Hangfájl megnyitása, Hangfájl mentése, Kilépés
-Szerkesztés menü » Másol, Kivág, Beilleszt, Töröl
+Fájl menü » Új hangfájl, Hangfájl megnyitása, Hangfájl mentése, Jelölőpontok betöltése, Kilépés
+Szerkesztés menü » Másol, Kivág, Beilleszt, Töröl, Új jelölőpont, Jelölőpontok listája
 Lejátszás menü » Lejátszás az elejétől, Kijelölt rész lejátszása, Lejátszás a kijelölt ponttól
 Nézet menü » Vízszintes ablak elrendezés, Négyzetes ablak elrendezés, Lapozott ablak elrendezés, Ablak elrendezés mentése, Ablak elrendezés betöltése
 Segítség menü » VoxBarber használata, Szerzői jogok
 A "szerkesztés" és a "lejátszás" menü elemei akkor aktívak, ha relevánsak. Tehát, ha nincs kiválasztva hangfájl, akkor nem lehet lejátszani. Ha nincs kijelölve semmi egy hangfájlban, akkor nem lehet szerkeszteni sem, stb
 A főképernyő üres. Kezdetben nincs tartalma.
-Az "új hangfájl" vagy a "hangfájl megnyitása" funkció hatására egy gyerek ablak nyílik meg. A gyerek ablakot nem lehet kimozgatni a főablakból, de átméretezhető és mozgatható.
-A gyerek ablakoknak van felső ikon/menüsora. Ott PLAY, PAUSE és STOP gombok vannak egy csoportban. Egy másik csoportban COPY, CUT és PASTE gombok vannak. A harmadikban egy "követés" kétállású gomb, valamint zoom in és zoom out, illetve egy balra és egy jobbra gomb. A negyedik csoport egy infó gomb, ami kinyit egy kicsi információs ablakot, ahol az adott fájlról vannak adatok: név, elérési útvonal, fájltípus, a zene hossza, tömörítési ráta és ha vannak a fájlban akkor egyéb infók, pl. zeneszám címe, előadó, kiadás éve, stb.
+Gyerekablakok hangfájloknak:
+Az "új hangfájl" vagy a "hangfájl megnyitása" funkció hatására egy gyerek ablak nyílik meg. A gyerek ablakot nem lehet kimozgatni a főablakból, de átméretezhető és mozgatható. A bal felső sarkában van piros, bezáró gomb.
+A gyerek ablakoknak van felső ikon/menüsora. Ott PLAY, PAUSE és STOP, és UGRÁS gombok vannak egy csoportban. Itt kap helyet egy csúszka, ami a hangerőt vezérli. Minden ablaknak külön hangerőszintje van. Az alaphangerő 50%.
+Egy másik csoportban MARKER+, COPY, CUT és PASTE gombok vannak. A harmadikban egy "követés" kétállású gomb, valamint zoom in és zoom out, illetve egy balra és egy jobbra gomb. A negyedik csoport egy infó gomb, ami kinyit egy kicsi információs ablakot, ahol az adott fájlról vannak adatok: név, elérési útvonal, fájltípus, a zene hossza, tömörítési ráta és ha vannak a fájlban akkor egyéb infók, pl. zeneszám címe, előadó, kiadás éve, stb.
 Ha egy hangfájl-ablak aktív, mert az szól, vagy az van szerkesztve, akkor annak a kerete, fejléce legyen élénkebb, mint a többié.
 
 hangmotor:
@@ -39,3 +41,9 @@ amikor egy gyerek-ablakba betöltődik egy hangfájl, akkor az ablak méretében
 Balra-jobbra gombok a hanghullámot mozgatják a megfelelő irányba a bezoomolt hangfájlrészlet hosszának negyedével.
 Az ablak alján lehessen látni egy időskálát, a zoomolásnak megfelelő sűrűségben. Ergó ha ki van zoomlova, akkor még a másodperc is sok lehet, de ha rá van közelítve akkor az millisec is kirajzolható.
 Lejátszáskor egy élénk színű függőleges vonal mutatja, hol jár a lejátszás.
+A követés gomb funkciója: ha be van nyomva, akkor a lejátszás kurzor ha elhagyja az ablak jobb szélét, akkor lapoz egyet, és így a kurzor bent marad az ablakban. A lapozás mindig az az időszelet, ami a zoom szerinti ablakméret időben számítva megenged. Ha a gomb nem aktív, akkor lejátszáskor a kurzor kiléphet az ablakból.
+
+hangkezelés:
+A hanghullámra kattintva a lejátszás és a kurzor (függőleges vonal) oda ugrik, ahová kattintva lett. Ha lejátszás közben történt, akkor ugrik a lejátszás, ha nem szólt a hangfájl, akkor csak a kurzor mozog, de a play/pause hatására onnan kezdi el lejátszani a hangfájlt a motor, ahol a kurzor áll.
+Az jelölőpont felvitele lényegében egy feltűnő vízszintes vonalat rajzol ki a hanghullám azon pontján, ahol épp a kurzor áll. A hanghullám tetején a jelölő vonal mellett ott a neve is, kicsi betükkel. A másik egy kis ablakot nyit, ahol a már meglévő jelölőpontok vannak időrendben listázva. Lehet őkez elnevezni és kitörölni. A listát lehessen elmenteni és visszatölteni is. A kiterjesztése a fájloknak, amiket elment VBM (VoxBarber Maker) legyen. Hangfájl neve, elérése és a markerek neve és időpontjai legyen elmentve benne. Mentéskor ajánlja fel a hangfájl nevét fájlnévnek. Betöltéskor ha már vannak markerek, akkor kérezze meg, hogy "jelölőpontok újratöltése", "jelölőpontok visszatöltése" vagy "jelölőpontok összemosása" történje-e? Újratöltéskor a jelenlegiek törlődnek, az betöltöttek lesznek érvényesek. Visszatöltéskor és összemosáskor is megmaradnak azok a már meglévő markerek, amelyeknek az időpontja nincs a betöltöttek között. Különbség annyi, hogy visszatöltéskor az egyezéseknél a betöltött név felülírja a meglévőt, míg összemosáskor a meglévő név marad meg, a betöltött helyett.  
+A gyerek-ablak "ugrás" gombja a következő marker-re ugrik a lejátszás. Ha nincs további marker, akkor visszaugrik az elsőre.

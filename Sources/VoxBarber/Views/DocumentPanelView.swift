@@ -1,6 +1,8 @@
 import AppKit
 import AVFoundation
 import VoxBarberAudio
+import UniformTypeIdentifiers
+import os
 
 /// Egy hangdokumentum paneljenek nézete.
 ///
@@ -10,7 +12,7 @@ import VoxBarberAudio
 ///  - eszköztárat (PLAY/PAUSE/STOP és COPY/CUT/PASTE csoportok)
 ///  - tartalom területet (hangforma megjelenítési helye)
 @MainActor
-final class DocumentPanelView: NSView {
+final class DocumentPanelView: NSView, NSTextFieldDelegate {
 
     // MARK: – Layout konstansok
 
@@ -60,6 +62,9 @@ final class DocumentPanelView: NSView {
     /// Az időskála nézet a waveform alatt.
     private weak var rulerView: TimeRulerView?
 
+    /// A "követés" toggle gomb – lenyomva tartja a kurzort a látható ablakban.
+    private weak var followBtn: NSButton?
+
     /// A stopper label – a lejátszási pozíciót mutatja HH:MM:SS.mmmm formában.
     private weak var timeLabel: NSTextField?
 
@@ -78,6 +83,11 @@ final class DocumentPanelView: NSView {
 
     /// A lejátszási / beillesztési kurzor pozíciója frame-ben.
     var cursorFrame: Int = 0
+    /// Ennek a panelnek a hangerő-szintje (0.0 – 1.0). Alapértelmezett: 50%.
+    private var volumeLevel: Float = 0.5
+    /// Lejátszás-követés: ha igaz, a scroll automatikusan lapoz, ha a kurzor
+    /// elhagyja a látható ablak jobb szélét.
+    private var followPlayback: Bool = false
 
     /// Aktuális zoom szint (1.0 = teljes fájl látszik, >1.0 = nagyítva).
     /// A waveform nézet ezt használja majd a megjelenítési tartomány számításához.
@@ -88,6 +98,19 @@ final class DocumentPanelView: NSView {
 
     /// A megnyitott fájl URL-je (mentéshez).
     private(set) var fileURL: URL?
+
+    /// Egy jelölőpont a hangformán: egyedi azonosító, név és frame-pozíció.
+    struct AudioMarker: Identifiable {
+        let id = UUID()
+        var name: String
+        var frame: Int
+    }
+
+    /// A panel jelölőpontjai. Időrendben (frame szerint) tartjuk rendezve.
+    private var markers: [AudioMarker] = []
+
+    /// A jelölőpontok listáját megjelenítő ablak (egyszerre csak egy).
+    private weak var markersWindow: NSWindow?
 
     // MARK: – Callback
 
@@ -166,13 +189,17 @@ final class DocumentPanelView: NSView {
         titleLabel.drawsBackground = false
         bar.addSubview(titleLabel)
 
-        // Bezáró gomb (✕)
-        let closeBtn = NSButton(title: "✕", target: self, action: #selector(closeTapped))
+        // Bezáró gomb – piros kör, bal felső sarok (macOS traffic light stílus)
+        let closeBtn = NSButton(title: "", target: self, action: #selector(closeTapped))
         closeBtn.translatesAutoresizingMaskIntoConstraints = false
-        closeBtn.bezelStyle   = .inline
+        closeBtn.bezelStyle   = .regularSquare
         closeBtn.isBordered   = false
-        closeBtn.font         = NSFont.systemFont(ofSize: 11)
-        closeBtn.contentTintColor = NSColor(white: 0.55, alpha: 1.0)
+        closeBtn.imagePosition = .imageOnly        // ne legyen szövegkeret
+        closeBtn.wantsLayer   = true
+        closeBtn.layer?.cornerRadius = 6
+        closeBtn.layer?.masksToBounds = true
+        closeBtn.layer?.backgroundColor = NSColor.systemRed.cgColor
+        closeBtn.toolTip = "Bezárás"
         bar.addSubview(closeBtn)
 
         // Stopper label (jobb felső sarok)
@@ -193,16 +220,16 @@ final class DocumentPanelView: NSView {
 
             titleLabel.centerXAnchor.constraint(equalTo: bar.centerXAnchor),
             titleLabel.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: bar.leadingAnchor, constant: 36),
+            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: closeBtn.trailingAnchor, constant: 4),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: tLabel.leadingAnchor, constant: -4),
 
-            tLabel.trailingAnchor.constraint(equalTo: closeBtn.leadingAnchor, constant: -6),
+            tLabel.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -8),
             tLabel.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
 
-            closeBtn.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -8),
+            closeBtn.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 8),
             closeBtn.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            closeBtn.widthAnchor.constraint(equalToConstant: 22),
-            closeBtn.heightAnchor.constraint(equalToConstant: 22)
+            closeBtn.widthAnchor.constraint(equalToConstant: 12),
+            closeBtn.heightAnchor.constraint(equalToConstant: 12)
         ])
     }
 
@@ -226,13 +253,60 @@ final class DocumentPanelView: NSView {
         let playBtn  = makeToolbarButton(symbol: "play.fill",  tooltip: "Lejátszás",  action: #selector(playTapped))
         let pauseBtn = makeToolbarButton(symbol: "pause.fill", tooltip: "Szünet",     action: #selector(pauseTapped))
         let stopBtn  = makeToolbarButton(symbol: "stop.fill",  tooltip: "Leállítás",  action: #selector(stopTapped))
+        let jumpBtn  = makeToolbarButton(symbol: "forward.end.fill", tooltip: "Ugrás a következő jelölőpontra", action: #selector(jumpToNextMarkerTapped))
+
+        // Hangerő ikon + csúzka
+        let volIcon = NSImageView()
+        volIcon.translatesAutoresizingMaskIntoConstraints = false
+        volIcon.image = NSImage(systemSymbolName: "speaker.wave.2.fill",
+                                accessibilityDescription: "Hangerő")
+        volIcon.contentTintColor = .secondaryLabelColor
+        NSLayoutConstraint.activate([
+            volIcon.widthAnchor.constraint(equalToConstant: 16),
+            volIcon.heightAnchor.constraint(equalToConstant: 16)
+        ])
+
+        let volSlider = NSSlider(value: Double(volumeLevel), minValue: 0, maxValue: 1,
+                                 target: self, action: #selector(volumeChanged(_:)))
+        volSlider.translatesAutoresizingMaskIntoConstraints = false
+        volSlider.sliderType     = .linear
+        volSlider.isContinuous   = true
+        volSlider.toolTip        = "Hangerő"
+        NSLayoutConstraint.activate([
+            volSlider.widthAnchor.constraint(equalToConstant: 72),
+            volSlider.heightAnchor.constraint(equalToConstant: 20)
+        ])
 
         // Középső csoport: szerkesztés vezérlők
+        let markerBtn = makeToolbarButton(symbol: "mappin.and.ellipse", tooltip: "Új jelölőpont", action: #selector(addMarkerTapped))
         let copyBtn  = makeToolbarButton(symbol: "doc.on.doc",        tooltip: "Másol",     action: #selector(copyTapped))
         let cutBtn   = makeToolbarButton(symbol: "scissors",          tooltip: "Kivág",     action: #selector(cutTapped))
         let pasteBtn = makeToolbarButton(symbol: "doc.on.clipboard",  tooltip: "Beilleszt", action: #selector(pasteTapped))
 
         // Jobb csoport: zoom + scroll vezérlők
+        let followToggle = NSButton(title: "", target: self, action: #selector(followTapped))
+        followToggle.translatesAutoresizingMaskIntoConstraints = false
+        followToggle.bezelStyle    = .regularSquare
+        followToggle.isBordered    = false
+        followToggle.setButtonType(.toggle)
+        followToggle.toolTip       = "Követés"
+        followToggle.imagePosition = .imageOnly
+        followToggle.wantsLayer    = true
+        followToggle.layer?.cornerRadius = 6
+        followToggle.layer?.backgroundColor = NSColor.clear.cgColor
+        if let img = NSImage(systemSymbolName: "arrow.forward.to.line", accessibilityDescription: "Követés") {
+            followToggle.image = img
+        } else {
+            followToggle.title = "KÖV"
+            followToggle.font  = NSFont.systemFont(ofSize: 9)
+        }
+        followToggle.contentTintColor = .secondaryLabelColor
+        NSLayoutConstraint.activate([
+            followToggle.widthAnchor.constraint(equalToConstant: 32),
+            followToggle.heightAnchor.constraint(equalToConstant: 28)
+        ])
+        self.followBtn = followToggle
+
         let zoomInBtn    = makeToolbarButton(symbol: "plus.magnifyingglass",  tooltip: "Zoom be",   action: #selector(zoomInTapped))
         let zoomOutBtn   = makeToolbarButton(symbol: "minus.magnifyingglass", tooltip: "Zoom ki",   action: #selector(zoomOutTapped))
         let scrollLeftBtn  = makeToolbarButton(symbol: "chevron.left",  tooltip: "Görgetés balra",  action: #selector(scrollLeftTapped))
@@ -259,7 +333,7 @@ final class DocumentPanelView: NSView {
         sep3.wantsLayer = true
         sep3.layer?.backgroundColor = NSColor(white: 0.35, alpha: 1.0).cgColor
 
-        for v in [playBtn, pauseBtn, stopBtn, sep1, copyBtn, cutBtn, pasteBtn, sep2, zoomInBtn, zoomOutBtn, scrollLeftBtn, scrollRightBtn, sep3, infoBtn] {
+        for v in [playBtn, pauseBtn, stopBtn, jumpBtn, volIcon, volSlider, sep1, markerBtn, copyBtn, cutBtn, pasteBtn, sep2, followToggle, zoomInBtn, zoomOutBtn, scrollLeftBtn, scrollRightBtn, sep3, infoBtn] {
             toolbar.addSubview(v)
         }
 
@@ -274,14 +348,26 @@ final class DocumentPanelView: NSView {
             stopBtn.leadingAnchor.constraint(equalTo: pauseBtn.trailingAnchor, constant: 4),
             stopBtn.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
 
+            jumpBtn.leadingAnchor.constraint(equalTo: stopBtn.trailingAnchor, constant: 4),
+            jumpBtn.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
+            volIcon.leadingAnchor.constraint(equalTo: jumpBtn.trailingAnchor, constant: 8),
+            volIcon.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
+            volSlider.leadingAnchor.constraint(equalTo: volIcon.trailingAnchor, constant: 4),
+            volSlider.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
             // Elválasztó 1
-            sep1.leadingAnchor.constraint(equalTo: stopBtn.trailingAnchor, constant: 12),
+            sep1.leadingAnchor.constraint(equalTo: volSlider.trailingAnchor, constant: 8),
             sep1.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             sep1.widthAnchor.constraint(equalToConstant: 1),
             sep1.heightAnchor.constraint(equalToConstant: 22),
 
             // COPY csoport
-            copyBtn.leadingAnchor.constraint(equalTo: sep1.trailingAnchor, constant: 12),
+            markerBtn.leadingAnchor.constraint(equalTo: sep1.trailingAnchor, constant: 12),
+            markerBtn.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
+            copyBtn.leadingAnchor.constraint(equalTo: markerBtn.trailingAnchor, constant: 4),
             copyBtn.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
 
             cutBtn.leadingAnchor.constraint(equalTo: copyBtn.trailingAnchor, constant: 4),
@@ -297,7 +383,10 @@ final class DocumentPanelView: NSView {
             sep2.heightAnchor.constraint(equalToConstant: 22),
 
             // ZOOM csoport
-            zoomInBtn.leadingAnchor.constraint(equalTo: sep2.trailingAnchor, constant: 12),
+            followToggle.leadingAnchor.constraint(equalTo: sep2.trailingAnchor, constant: 12),
+            followToggle.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
+            zoomInBtn.leadingAnchor.constraint(equalTo: followToggle.trailingAnchor, constant: 4),
             zoomInBtn.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
 
             zoomOutBtn.leadingAnchor.constraint(equalTo: zoomInBtn.trailingAnchor, constant: 4),
@@ -361,6 +450,11 @@ final class DocumentPanelView: NSView {
         // Scroll szinkronizálás: WaveformView drag → TimeRulerView frissítés
         wv.onScrollOffsetChanged = { [weak rv] offset in
             rv?.setScrollOffset(offset)
+        }
+
+        // Kattintás a hangformára → kurzor / lejátszás ugratás
+        wv.onSeek = { [weak self] frame in
+            self?.seek(toFrame: frame)
         }
 
         // Átméretező fogantyú (jobb alsó sarok)
@@ -515,11 +609,33 @@ final class DocumentPanelView: NSView {
         playbackTimer = nil
     }
 
-    /// Frissíti a stopper labelt az aktuális lejátszási pozíció alapján.
+    /// Frissíti a stopper labelt az aktuális lejátszási pozíció alapján,
+    /// és ha a követés aktív, lapoz, ha a kurzor elhagyja a látható ablakot.
     private func tickTimer() {
         let frame = AudioEngine.shared.currentPlaybackFrame()
+        cursorFrame = frame
         timeLabel?.stringValue = formatPlaybackTime(frame: frame)
         waveformView?.setCursorFrame(frame)
+
+        // Követés: ha a kurzor a látható ablak jobb széle mögé ért, lapozzunk
+        if followPlayback,
+           audioBuffer.frameCount > 0,
+           audioBuffer.sampleRate > 0,
+           zoomLevel > 1.0 {
+            let totalDuration   = Double(audioBuffer.frameCount) / audioBuffer.sampleRate
+            let visibleDuration = totalDuration / zoomLevel
+            let cursorSec       = Double(frame) / audioBuffer.sampleRate
+            let currentOffset   = waveformView?.currentScrollOffset ?? 0
+            let windowEnd       = currentOffset + visibleDuration
+
+            if cursorSec >= windowEnd {
+                // Lapozzunk egy teljes ablaknyit előre
+                let maxOffset  = max(0.0, totalDuration - visibleDuration)
+                let newOffset  = min(maxOffset, currentOffset + visibleDuration)
+                waveformView?.setScrollOffset(newOffset)
+                rulerView?.setScrollOffset(newOffset)
+            }
+        }
     }
 
     /// Frame-számot alakít HH:MM:SS.mmmm formátummá.
@@ -563,8 +679,28 @@ final class DocumentPanelView: NSView {
 
     // MARK: – Lejátszás akciók
 
+    /// Igaz, ha éppen szól ennek a panelnek a hangja.
+    private var isPlaying: Bool { playbackTimer != nil }
+
+    /// A hangformára kattintás hatása: a kurzort a megadott frame-re állítja.
+    /// Ha éppen szól a hangfájl, a lejátszás is odaugrik; ha nem, csak a kurzor
+    /// mozdul, és a következő play/pause innen indul.
+    private func seek(toFrame frame: Int) {
+        let clamped = max(0, min(audioBuffer.frameCount, frame))
+        cursorFrame = clamped
+        timeLabel?.stringValue = formatPlaybackTime(frame: clamped)
+        waveformView?.setCursorFrame(clamped)
+
+        if isPlaying {
+            // Lejátszás közben: ugrik a lejátszás az új pozícióra
+            AudioEngine.shared.setVolume(volumeLevel)
+            AudioEngine.shared.play(audioBuffer, fromFrame: clamped, panelID: panelID)
+        }
+    }
+
     @objc private func playTapped() {
         DocumentPanelView.playing = self
+        AudioEngine.shared.setVolume(volumeLevel)
         AudioEngine.shared.play(audioBuffer, fromFrame: cursorFrame, panelID: panelID)
         startPlaybackTimer()
     }
@@ -585,6 +721,22 @@ final class DocumentPanelView: NSView {
         cursorFrame = 0
         timeLabel?.stringValue = "00:00:00.0000"
         waveformView?.setCursorFrame(-1)
+    }
+
+    /// Ugrás a következő jelölőpontra: a kurzort (és lejátszás közben a
+    /// lejátszást is) a jelenlegi pozíciónál későbbi első markerre állítja.
+    /// Ha nincs további marker, körbe-ugrik az első (legkorábbi) markerre.
+    @objc private func jumpToNextMarkerTapped() {
+        let sortedFrames = markers.map(\.frame).sorted()
+        guard !sortedFrames.isEmpty else { return }
+        let current = isPlaying ? AudioEngine.shared.currentPlaybackFrame() : cursorFrame
+        let target = sortedFrames.first(where: { $0 > current }) ?? sortedFrames[0]
+        seek(toFrame: target)
+    }
+
+    /// A toolbar MARKER+ gombja: új jelölőpontot tesz a kurzorpozícióra.
+    @objc private func addMarkerTapped() {
+        addMarkerAtCursor()
     }
 
     // MARK: – Szerkesztés akciók
@@ -613,6 +765,374 @@ final class DocumentPanelView: NSView {
         // TODO: waveform újrarajzolás
     }
 
+    // MARK: – Jelölőpont akciók
+
+    /// Igaz, ha a panelnek van legalább egy jelölőpontja.
+    var hasMarkers: Bool { !markers.isEmpty }
+
+    /// Új jelölőpontot hoz létre az aktuális kurzorpozíción.
+    /// A jelölőpontokat időrendben tartjuk, és a hangformán feltűnő vonallal jelöljük.
+    func addMarkerAtCursor() {
+        // Lejátszás közben a friss lejátszási pozíciót használjuk.
+        let sourceFrame = isPlaying ? AudioEngine.shared.currentPlaybackFrame() : cursorFrame
+        let frame = max(0, min(audioBuffer.frameCount, sourceFrame))
+        let name  = "Jelölő \(markers.count + 1)"
+        markers.append(AudioMarker(name: name, frame: frame))
+        markers.sort { $0.frame < $1.frame }
+        refreshMarkerOverlay()
+        rebuildMarkersWindowContent()
+    }
+
+    /// Frissíti a hangformán megjelenő jelölővonalakat.
+    private func refreshMarkerOverlay() {
+        waveformView?.setMarkerFrames(markers.map(\.frame), names: markers.map(\.name))
+    }
+
+    /// Megnyitja (vagy előtérbe hozza) a jelölőpontok listáját tartalmazó ablakot.
+    func showMarkersList() {
+        if let win = markersWindow {
+            win.makeKeyAndOrderFront(nil)
+            rebuildMarkersWindowContent()
+            return
+        }
+
+        let win = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 360),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: true
+        )
+        win.title = "Jelölőpontok"
+        win.isReleasedWhenClosed = false
+        win.level = .floating
+        markersWindow = win
+        rebuildMarkersWindowContent()
+        win.center()
+        win.makeKeyAndOrderFront(nil)
+    }
+
+    /// Újraépíti a jelölőpont-ablak tartalmát az aktuális `markers` lista alapján.
+    private func rebuildMarkersWindowContent() {
+        guard let win = markersWindow else { return }
+
+        let root = NSView()
+
+        // Felső terület: lista vagy üres állapot.
+        let listContainer = NSView()
+        listContainer.translatesAutoresizingMaskIntoConstraints = false
+
+        if markers.isEmpty {
+            let empty = NSTextField(labelWithString: "Nincs még jelölőpont.")
+            empty.translatesAutoresizingMaskIntoConstraints = false
+            empty.textColor = .secondaryLabelColor
+            listContainer.addSubview(empty)
+            NSLayoutConstraint.activate([
+                empty.centerXAnchor.constraint(equalTo: listContainer.centerXAnchor),
+                empty.centerYAnchor.constraint(equalTo: listContainer.centerYAnchor)
+            ])
+        } else {
+            let stack = NSStackView()
+            stack.orientation = .vertical
+            stack.alignment   = .leading
+            stack.spacing     = 6
+            stack.edgeInsets  = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+            stack.translatesAutoresizingMaskIntoConstraints = false
+
+            for marker in markers {
+                let row = NSStackView()
+                row.orientation = .horizontal
+                row.spacing     = 8
+                row.translatesAutoresizingMaskIntoConstraints = false
+
+                // Idő címke
+                let timeLabel = NSTextField(labelWithString: formatPlaybackTime(frame: marker.frame))
+                timeLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+                timeLabel.textColor = .secondaryLabelColor
+                timeLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+                // Szerkeszthető névmező
+                let nameField = NSTextField(string: marker.name)
+                nameField.translatesAutoresizingMaskIntoConstraints = false
+                nameField.font = NSFont.systemFont(ofSize: 12)
+                nameField.delegate = self
+                nameField.target = self
+                nameField.action = #selector(markerNameChanged(_:))
+                nameField.identifier = NSUserInterfaceItemIdentifier(marker.id.uuidString)
+                nameField.widthAnchor.constraint(equalToConstant: 250).isActive = true
+
+                // Törlés gomb
+                let delBtn = NSButton(title: "", target: self, action: #selector(deleteMarkerTapped(_:)))
+                delBtn.bezelStyle = .inline
+                delBtn.isBordered = false
+                delBtn.image = NSImage(systemSymbolName: "trash", accessibilityDescription: "Törlés")
+                delBtn.contentTintColor = .systemRed
+                delBtn.identifier = NSUserInterfaceItemIdentifier(marker.id.uuidString)
+                delBtn.setContentHuggingPriority(.required, for: .horizontal)
+                delBtn.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+                row.addArrangedSubview(timeLabel)
+                row.addArrangedSubview(nameField)
+                row.addArrangedSubview(delBtn)
+                stack.addArrangedSubview(row)
+            }
+
+            let scroll = NSScrollView()
+            scroll.translatesAutoresizingMaskIntoConstraints = false
+            scroll.hasVerticalScroller = true
+            scroll.drawsBackground = false
+            let doc = NSView()
+            doc.translatesAutoresizingMaskIntoConstraints = false
+            doc.addSubview(stack)
+            scroll.documentView = doc
+
+            listContainer.addSubview(scroll)
+            NSLayoutConstraint.activate([
+                scroll.topAnchor.constraint(equalTo: listContainer.topAnchor),
+                scroll.leadingAnchor.constraint(equalTo: listContainer.leadingAnchor),
+                scroll.trailingAnchor.constraint(equalTo: listContainer.trailingAnchor),
+                scroll.bottomAnchor.constraint(equalTo: listContainer.bottomAnchor),
+
+                stack.topAnchor.constraint(equalTo: doc.topAnchor),
+                stack.leadingAnchor.constraint(equalTo: doc.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
+                stack.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
+                doc.widthAnchor.constraint(equalTo: scroll.widthAnchor)
+            ])
+        }
+
+        // Alsó gombsor: Mentés / Betöltés.
+        let saveBtn = NSButton(title: "Mentés…", target: self, action: #selector(saveMarkersTapped))
+        saveBtn.bezelStyle = .rounded
+        saveBtn.isEnabled = !markers.isEmpty
+        let loadBtn = NSButton(title: "Betöltés…", target: self, action: #selector(loadMarkersTapped))
+        loadBtn.bezelStyle = .rounded
+
+        let buttonBar = NSStackView(views: [loadBtn, NSView(), saveBtn])
+        buttonBar.orientation = .horizontal
+        buttonBar.spacing = 8
+        buttonBar.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+        buttonBar.translatesAutoresizingMaskIntoConstraints = false
+
+        root.addSubview(listContainer)
+        root.addSubview(buttonBar)
+        NSLayoutConstraint.activate([
+            listContainer.topAnchor.constraint(equalTo: root.topAnchor),
+            listContainer.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            listContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+
+            buttonBar.topAnchor.constraint(equalTo: listContainer.bottomAnchor),
+            buttonBar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            buttonBar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            buttonBar.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+        ])
+
+        win.contentView = root
+    }
+
+    /// A jelölőpont nevének szerkesztésekor hívódik (Enter / fókuszvesztés).
+    @objc private func markerNameChanged(_ sender: NSTextField) {
+        updateMarkerName(from: sender)
+    }
+
+    /// Minden beütésnél hívódik – így a hangformán élőben frissül a név.
+    func controlTextDidChange(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField else { return }
+        updateMarkerName(from: field)
+    }
+
+    /// A megadott mező azonosítója alapján frissíti a marker nevét és a hangformát.
+    private func updateMarkerName(from field: NSTextField) {
+        guard let idString = field.identifier?.rawValue,
+              let idx = markers.firstIndex(where: { $0.id.uuidString == idString }) else { return }
+        markers[idx].name = field.stringValue
+        refreshMarkerOverlay()
+    }
+
+    /// Egy jelölőpont törlése a lista törlés gombjáról.
+    @objc private func deleteMarkerTapped(_ sender: NSButton) {
+        guard let idString = sender.identifier?.rawValue else { return }
+        markers.removeAll { $0.id.uuidString == idString }
+        refreshMarkerOverlay()
+        rebuildMarkersWindowContent()
+    }
+
+    // MARK: – Jelölőpont lista mentés / betöltés (VBM)
+
+    /// A VBM (VoxBarber Maker) fájl szerializálható formátuma.
+    private struct MarkerFile: Codable {
+        var version: Int = 1
+        var audioFileName: String?
+        var audioFilePath: String?
+        var sampleRate: Double
+        var markers: [Item]
+        struct Item: Codable {
+            var name: String
+            var frame: Int
+        }
+    }
+
+    /// A VBM fájlok típusa (egyedi kiterjesztés alapján).
+    private static let vbmType: UTType = UTType(filenameExtension: "vbm") ?? .data
+
+    /// Mentés gomb: VBM fájlba menti a jelölőpontokat.
+    @objc private func saveMarkersTapped() {
+        guard !markers.isEmpty else { return }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [Self.vbmType]
+        panel.canCreateDirectories = true
+        // Alapértelmezett fájlnév a hangfájl nevéből.
+        let baseName = fileURL?.deletingPathExtension().lastPathComponent ?? "Jelölőpontok"
+        panel.nameFieldStringValue = "\(baseName).vbm"
+
+        let win = markersWindow
+        let complete: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            self.writeMarkers(to: url)
+        }
+        if let win {
+            panel.beginSheetModal(for: win, completionHandler: complete)
+        } else {
+            complete(panel.runModal())
+        }
+    }
+
+    /// Betöltés gomb: VBM fájlból olvassa vissza a jelölőpontokat.
+    @objc private func loadMarkersTapped() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [Self.vbmType]
+
+        let win = markersWindow
+        let complete: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            self.readMarkers(from: url)
+        }
+        if let win {
+            panel.beginSheetModal(for: win, completionHandler: complete)
+        } else {
+            complete(panel.runModal())
+        }
+    }
+
+    /// Publikus belépési pont a menüből: ugyanaz, mint a betöltés gomb.
+    func loadMarkersFromMenu() {
+        loadMarkersTapped()
+    }
+
+    /// A jelölőpontokat a megadott URL-re írja JSON formátumban.
+    private func writeMarkers(to url: URL) {
+        let file = MarkerFile(
+            audioFileName: fileURL?.lastPathComponent,
+            audioFilePath: fileURL?.path,
+            sampleRate: audioBuffer.sampleRate,
+            markers: markers.map { MarkerFile.Item(name: $0.name, frame: $0.frame) }
+        )
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(file)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            presentMarkerError("A jelölőpontok mentése nem sikerült.", error)
+        }
+    }
+
+    /// A megadott URL-ről olvassa be és állítja vissza a jelölőpontokat.
+    /// Ha már vannak markerek, megkérdezi az egyesítés módját.
+    private func readMarkers(from url: URL) {
+        let loaded: [AudioMarker]
+        do {
+            let data = try Data(contentsOf: url)
+            let file = try JSONDecoder().decode(MarkerFile.self, from: data)
+            loaded = file.markers.map { AudioMarker(name: $0.name, frame: $0.frame) }
+        } catch {
+            presentMarkerError("A jelölőpontok betöltése nem sikerült.", error)
+            return
+        }
+
+        // Ha nincs még marker, egyszerűen betöltjük.
+        guard !markers.isEmpty else {
+            applyLoadedMarkers(loaded, mode: .replace)
+            return
+        }
+
+        // Egyesítési mód bekérése a felhasználótól.
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Jelölőpontok betöltése"
+        alert.informativeText = "Már vannak jelölőpontok. Hogyan történjen a betöltés?"
+        alert.addButton(withTitle: "Újratöltés")    // törli a meglévőket
+        alert.addButton(withTitle: "Visszatöltés")  // egyezésnél a betöltött név nyer
+        alert.addButton(withTitle: "Összemosás")    // egyezésnél a meglévő név marad
+        alert.addButton(withTitle: "Mégse")
+
+        let handler: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard let self else { return }
+            switch response {
+            case .alertFirstButtonReturn:  self.applyLoadedMarkers(loaded, mode: .replace)
+            case .alertSecondButtonReturn: self.applyLoadedMarkers(loaded, mode: .reload)
+            case .alertThirdButtonReturn:  self.applyLoadedMarkers(loaded, mode: .merge)
+            default: break  // Mégse
+            }
+        }
+
+        if let win = markersWindow {
+            alert.beginSheetModal(for: win, completionHandler: handler)
+        } else {
+            handler(alert.runModal())
+        }
+    }
+
+    /// A jelölőpont-betöltés egyesítési módjai.
+    private enum MarkerMergeMode {
+        case replace  // Újratöltés: a meglévők törlődnek, csak a betöltöttek maradnak
+        case reload   // Visszatöltés: egyezésnél a betöltött név írja felül a meglévőt
+        case merge    // Összemosás: egyezésnél a meglévő név marad meg
+    }
+
+    /// Alkalmazza a betöltött markereket a megadott mód szerint.
+    private func applyLoadedMarkers(_ loaded: [AudioMarker], mode: MarkerMergeMode) {
+        switch mode {
+        case .replace:
+            markers = loaded
+
+        case .reload, .merge:
+            let loadedFrames = Set(loaded.map(\.frame))
+            // A meglévők közül megtartjuk azokat, amelyek időpontja nincs a betöltöttek között.
+            let keptExisting = markers.filter { !loadedFrames.contains($0.frame) }
+
+            if mode == .reload {
+                // Egyezésnél a betöltött név nyer → a betöltöttek a mérvadók.
+                markers = keptExisting + loaded
+            } else {
+                // Összemosás: egyezésnél a meglévő név marad meg.
+                let existingFrames = Set(markers.map(\.frame))
+                let newOnes = loaded.filter { !existingFrames.contains($0.frame) }
+                markers = markers + newOnes
+            }
+        }
+        markers.sort { $0.frame < $1.frame }
+        refreshMarkerOverlay()
+        rebuildMarkersWindowContent()
+    }
+
+    /// Hibaüzenetet jelenít meg a felhasználónak.
+    private func presentMarkerError(_ message: String, _ error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = message
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: "OK")
+        if let win = markersWindow {
+            alert.beginSheetModal(for: win, completionHandler: nil)
+        } else {
+            alert.runModal()
+        }
+    }
+
     // MARK: – Zoom akciók
 
     @objc func zoomInTapped() {
@@ -637,6 +1157,14 @@ final class DocumentPanelView: NSView {
         rulerView?.setScrollOffset(newOffset)
     }
 
+    @objc private func volumeChanged(_ sender: NSSlider) {
+        volumeLevel = Float(sender.doubleValue)
+        // Ha éppen ez a panel szól, azonnal alkalmazzuk
+        if DocumentPanelView.playing === self {
+            AudioEngine.shared.setVolume(volumeLevel)
+        }
+    }
+
     @objc func scrollRightTapped() {
         guard zoomLevel > 1.0, audioBuffer.frameCount > 0 else { return }
         let totalDuration   = Double(audioBuffer.frameCount) / audioBuffer.sampleRate
@@ -646,6 +1174,15 @@ final class DocumentPanelView: NSView {
         let newOffset       = min(maxOffset, (waveformView?.currentScrollOffset ?? 0) + step)
         waveformView?.setScrollOffset(newOffset)
         rulerView?.setScrollOffset(newOffset)
+    }
+
+    @objc func followTapped() {
+        followPlayback = followBtn?.state == .on
+        followBtn?.contentTintColor = followPlayback ? .controlAccentColor : .secondaryLabelColor
+        let bg: CGColor = followPlayback
+            ? NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor
+            : NSColor.clear.cgColor
+        followBtn?.layer?.backgroundColor = bg
     }
 
     // MARK: – Info akció
@@ -685,12 +1222,25 @@ final class DocumentPanelView: NSView {
         Task {
             let asset = AVURLAsset(url: url)
             var metaLines: [String] = []
+            let log = Logger(subsystem: "VoxBarber", category: "Metadata")
 
             // AVFoundation közös metaadat kulcsok
-            let metaItems = try? await asset.load(.commonMetadata)
-            for item in metaItems ?? [] {
+            let metaItems: [AVMetadataItem]
+            do {
+                metaItems = try await asset.load(.commonMetadata)
+            } catch {
+                log.error("Metaadat betöltése sikertelen: \(error.localizedDescription, privacy: .public)")
+                metaItems = []
+            }
+            for item in metaItems {
                 guard let key = item.commonKey else { continue }
-                let value = (try? await item.load(.stringValue)) ?? ""
+                let value: String
+                do {
+                    value = try await item.load(.stringValue) ?? ""
+                } catch {
+                    log.error("Metaadat érték betöltése sikertelen (\(key.rawValue, privacy: .public)): \(error.localizedDescription, privacy: .public)")
+                    continue
+                }
                 switch key {
                 case .commonKeyTitle:       metaLines.append("Cím:  \(value)")
                 case .commonKeyArtist:      metaLines.append("Előadó:  \(value)")

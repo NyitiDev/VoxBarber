@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import SFBAudioEngine
+import os
 
 /// Hangfájlok betöltése, lejátszása és mentése.
 ///
@@ -10,6 +11,10 @@ import SFBAudioEngine
 /// - Mentés: AVAudioFile (WAV, AAC, FLAC) + SFBAudioEngine (MP3 – következő iteráció)
 @MainActor
 public final class AudioEngine {
+
+    // MARK: – Diagnosztika
+
+    private let log = Logger(subsystem: "VoxBarber", category: "AudioEngine")
 
     // MARK: – Singleton
 
@@ -24,7 +29,11 @@ public final class AudioEngine {
     private func setupAVEngine() {
         avEngine.attach(playerNode)
         avEngine.connect(playerNode, to: avEngine.mainMixerNode, format: nil)
-        try? avEngine.start()
+        do {
+            try avEngine.start()
+        } catch {
+            log.error("AVAudioEngine indítása sikertelen (setup): \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     // MARK: – Betöltés
@@ -34,7 +43,13 @@ public final class AudioEngine {
     public func load(url: URL) throws -> AudioBuffer {
         let decoder = try AudioDecoder(url: url)
         try decoder.open()
-        defer { try? decoder.close() }
+        defer {
+            do {
+                try decoder.close()
+            } catch {
+                log.error("Dekóder lezárása sikertelen: \(error.localizedDescription, privacy: .public)")
+            }
+        }
 
         let channelCount = Int(decoder.processingFormat.channelCount)
         let sampleRate   = decoder.processingFormat.sampleRate
@@ -100,7 +115,14 @@ public final class AudioEngine {
         // Mindig leállítjuk – szüneteltetett állapotban is – hogy töröljük a sorban
         // álló régi puffereket. Így sosem játszódik le előző panel hangja.
         playerNode.stop()
-        if !avEngine.isRunning { try? avEngine.start() }
+        if !avEngine.isRunning {
+            do {
+                try avEngine.start()
+            } catch {
+                log.error("AVAudioEngine indítása sikertelen (play): \(error.localizedDescription, privacy: .public)")
+                return
+            }
+        }
 
         currentPlayingPanelID = panelID
         playbackStartFrame = max(0, atFrame)
@@ -124,6 +146,11 @@ public final class AudioEngine {
 
     /// Szünetelteti a lejátszást.
     public func pause() { playerNode.pause() }
+
+    /// Beállítja a lejátszó hangerejét (0.0 – 1.0).
+    public func setVolume(_ volume: Float) {
+        playerNode.volume = max(0.0, min(1.0, volume))
+    }
 
     // MARK: – Mentés
 

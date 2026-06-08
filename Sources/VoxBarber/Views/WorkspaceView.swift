@@ -45,8 +45,10 @@ final class WorkspaceView: NSView {
         let panel = makePanel(title: title, fileURL: fileURL)
         addSubview(panel)
         panels.append(panel)
-        // Az újonnan nyíló panel kerüljön előtérbe
+        // Az újonnan nyíló panel kerüljön előtérbe és legyen az aktív (fókuszált) panel,
+        // hogy a menüelemek (pl. „Új jelölőpont") rögtön elérhetők legyenek.
         panel.bringToFront()
+        DocumentPanelView.focused = panel
     }
 
     // MARK: – Panel létrehozás

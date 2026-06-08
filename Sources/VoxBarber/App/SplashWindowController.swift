@@ -49,12 +49,24 @@ final class SplashWindowController: NSWindowController {
         // ── START gomb (először adjuk hozzá, hogy a logo kényszerfeltételei hivatkozhassanak rá) ──
         let startButton = NSButton(title: "START", target: self, action: #selector(startTapped))
         startButton.translatesAutoresizingMaskIntoConstraints = false
-        startButton.bezelStyle = .rounded
-        startButton.font = NSFont.systemFont(ofSize: 17, weight: .semibold)
+        startButton.bezelStyle = .regularSquare
+        startButton.isBordered = false
         startButton.wantsLayer = true
         startButton.layer?.backgroundColor = NSColor.systemBlue.cgColor
         startButton.layer?.cornerRadius = 8
-        startButton.contentTintColor = .white
+        startButton.layer?.masksToBounds = true
+        // Fehér, középre igazított felirat (a contentTintColor nem hat a sima title-re,
+        // ha isBordered = false, ezért attribútumos címet használunk)
+        let titleStyle = NSMutableParagraphStyle()
+        titleStyle.alignment = .center
+        startButton.attributedTitle = NSAttributedString(
+            string: "START",
+            attributes: [
+                .foregroundColor: NSColor.white,
+                .font: NSFont.systemFont(ofSize: 17, weight: .semibold),
+                .paragraphStyle: titleStyle
+            ]
+        )
         contentView.addSubview(startButton)
 
         // ── Logo ImageView ───────────────────────────────────────────────
