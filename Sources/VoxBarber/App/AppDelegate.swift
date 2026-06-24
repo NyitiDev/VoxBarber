@@ -12,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private var splashWindowController: SplashWindowController?
 
+    /// A „VoxBarber használata” súgóablak vezérlője.
+    private var helpWindowController: HelpWindowController?
+
     /// A főablak vezérlője – a splash bezárása után jön létre.
     var mainWindowController: MainWindowController?
 
@@ -242,6 +245,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard idx >= 0, idx < formats.count else { return }
         let chosenFormat = formats[idx]
 
+        // MP3 esetén a felhasználó megadhatja a bitrátát.
+        var chosenBitrate = 192
+        if chosenFormat == .mp3 {
+            guard let bitrate = askMP3Bitrate() else { return }
+            chosenBitrate = bitrate
+        }
+
         // Célfájl kiválasztása
         let savePanel = NSSavePanel()
         savePanel.title = "Hangfájl mentése"
@@ -250,13 +260,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard savePanel.runModal() == .OK, let url = savePanel.url else { return }
 
         do {
-            try AudioEngine.shared.save(panel.audioBuffer, to: url, format: chosenFormat)
+            try AudioEngine.shared.save(panel.audioBuffer, to: url, format: chosenFormat, bitrate: chosenBitrate)
         } catch {
             let errAlert = NSAlert()
             errAlert.messageText = "Mentési hiba"
             errAlert.informativeText = error.localizedDescription
             errAlert.runModal()
         }
+    }
+
+    /// MP3 bitráta-választó dialógus. A választott értéket kbps-ben adja vissza,
+    /// vagy `nil`-t, ha a felhasználó megszakította.
+    private func askMP3Bitrate() -> Int? {
+        let options = [128, 160, 192, 256, 320]
+        let alert = NSAlert()
+        alert.messageText = "MP3 bitráta"
+        alert.informativeText = "Válassza ki a kívánt MP3 bitrátát (kbps):"
+
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 120, height: 26))
+        popup.addItems(withTitles: options.map { "\($0) kbps" })
+        popup.selectItem(withTitle: "192 kbps")
+        alert.accessoryView = popup
+
+        alert.addButton(withTitle: "Mentés")
+        alert.addButton(withTitle: "Mégse")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let selected = popup.indexOfSelectedItem
+        guard selected >= 0, selected < options.count else { return 192 }
+        return options[selected]
     }
 
     // ── Lejátszás akciók (stub – hangmotor implementálásáig) ─────────────
@@ -367,20 +399,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // ── Segítség akciók ───────────────────────────────────────────────────
 
     @objc private func showHelp() {
-        let alert = NSAlert()
-        alert.messageText = "VoxBarber használata"
-        alert.informativeText = """
-            Hangfájl megnyitása: Fájl › Hangfájl megnyitása (⌘O)
-            Új hangfájl: Fájl › Új hangfájl (⌘N)
-            A megnyíló paneleken lehet a hangfájlokat lejátszani és szerkeszteni.
-            """
-        alert.runModal()
+        if helpWindowController == nil {
+            helpWindowController = HelpWindowController()
+        }
+        helpWindowController?.showWindow(nil)
+        helpWindowController?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func showCopyright() {
         let alert = NSAlert()
         alert.messageText = "Szerzői jogok"
-        alert.informativeText = "© 2026 VoxBarber. Minden jog fenntartva."
+        alert.informativeText = """
+            VoxBarber – hangfájl-szerkesztő macOS-re
+            Verzió 1.0
+
+            © 2026 VoxBarber. Minden jog fenntartva.
+
+            Készítette: Nyitrai Attila
+            E-mail: attila.nyitrai@gmail.com
+
+            A program a felhasználó saját hangfelvételeinek szerkesztésére \
+            készült. A szerkesztett vagy beillesztett hanganyagok szerzői \
+            jogaiért és felhasználásuk jogszerűségéért a felhasználó felel.
+
+            Felhasznált komponensek:
+            • AVFoundation – a hang lejátszásához és kezeléséhez (© Apple Inc.)
+            • SFBAudioEngine – a hangfájlok dekódolásához \
+            (© Stephen F. Booth, nyílt forráskódú licenc alatt)
+            """
         alert.runModal()
     }
 

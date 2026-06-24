@@ -1470,7 +1470,22 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         Task {
             let asset = AVURLAsset(url: url)
             var metaLines: [String] = []
+            var bitrateLine: String?
             let log = Logger(subsystem: "VoxBarber", category: "Metadata")
+
+            // Forrásfájl bitrátája az audiosáv becsült adatsebességéből.
+            do {
+                let tracks = try await asset.loadTracks(withMediaType: .audio)
+                if let track = tracks.first {
+                    let dataRate = try await track.load(.estimatedDataRate)
+                    if dataRate > 0 {
+                        let kbps = Int((dataRate / 1000).rounded())
+                        bitrateLine = "Bitráta:  \(kbps) kbps"
+                    }
+                }
+            } catch {
+                log.error("Bitráta betöltése sikertelen: \(error.localizedDescription, privacy: .public)")
+            }
 
             // AVFoundation közös metaadat kulcsok
             let metaItems: [AVMetadataItem]
@@ -1500,7 +1515,11 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
             }
 
             await MainActor.run {
-                self.showInfoPanel(lines: lines + (metaLines.isEmpty ? [] : [""] + metaLines))
+                var infoLines = lines
+                if let bitrateLine = bitrateLine {
+                    infoLines.append(bitrateLine)
+                }
+                self.showInfoPanel(lines: infoLines + (metaLines.isEmpty ? [] : [""] + metaLines))
             }
         }
     }

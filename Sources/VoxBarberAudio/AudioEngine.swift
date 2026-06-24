@@ -164,7 +164,20 @@ public final class AudioEngine {
     // MARK: – Mentés
 
     /// Az `AudioBuffer` tartalmát fájlba menti a megadott formátumban.
-    public func save(_ buffer: AudioBuffer, to url: URL, format: ExportFormat) throws {
+    /// - Parameters:
+    ///   - buffer: A mentendő hangpuffer.
+    ///   - url: A célfájl URL-je.
+    ///   - format: A kívánt exportformátum.
+    ///   - bitrate: MP3 esetén a konstans bitráta kbps-ben (alapértelmezett: 192).
+    ///     Más formátumoknál figyelmen kívül marad.
+    public func save(_ buffer: AudioBuffer, to url: URL, format: ExportFormat, bitrate: Int = 192) throws {
+        // Az MP3-at a SFBAudioEngine (LAME) enkódolja, mert az AVAudioFile nem
+        // tud natív MP3-at írni macOS-en.
+        if format == .mp3 {
+            try saveMP3(buffer, to: url, bitrate: bitrate)
+            return
+        }
+
         guard let pcm = buffer.toAVAudioPCMBuffer() else {
             throw AudioEngineError.bufferConversionFailed
         }
@@ -194,14 +207,8 @@ public final class AudioEngine {
                 AVLinearPCMBitDepthKey: 16
             ]
         case .mp3:
-            // AVAudioFile nem ír natív MP3-at macOS-en; ideiglenesen PCM WAV-ként ment.
-            settings = [
-                AVFormatIDKey:          kAudioFormatLinearPCM,
-                AVSampleRateKey:        buffer.sampleRate,
-                AVNumberOfChannelsKey:  buffer.channelCount,
-                AVLinearPCMBitDepthKey: 16,
-                AVLinearPCMIsFloatKey:  false
-            ]
+            // Az MP3-ot fent külön ág kezeli; ide nem jutunk el.
+            return
         }
 
         let file = try AVAudioFile(forWriting: url,
@@ -209,6 +216,31 @@ public final class AudioEngine {
                                    commonFormat: .pcmFormatFloat32,
                                    interleaved: false)
         try file.write(from: pcm)
+    }
+
+    /// MP3 fájlt ír a SFBAudioEngine (LAME) enkóderrel, állandó bitrátával.
+    private func saveMP3(_ buffer: AudioBuffer, to url: URL, bitrate: Int) throws {
+        guard let pcm = buffer.toInterleavedAVAudioPCMBuffer() else {
+            throw AudioEngineError.bufferConversionFailed
+        }
+
+        // Az enkóder nem felülír; a meglévő célfájlt előbb eltávolítjuk.
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+
+        // Az enkódert a fájl kiterjesztése (.mp3) alapján választjuk ki – az
+        // `encoderName` alapú kiválasztás pointer-azonosságot vár az exportált
+        // konstansra, amit Swiftből nem tudunk megbízhatóan átadni.
+        let encoder = try AudioEncoder(url: url)
+        encoder.settings = [
+            AudioEncodingSettingsKey(rawValue: "Constant Bitrate"): bitrate
+        ]
+        try encoder.setSourceFormat(pcm.format)
+        try encoder.openReturningError()
+        try encoder.encode(from: pcm)
+        try encoder.finish()
+        try encoder.close()
     }
 }
 

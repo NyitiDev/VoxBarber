@@ -142,4 +142,29 @@ public final class AudioBuffer {
         }
         return pcm
     }
+
+    /// Interleaved Float32 `AVAudioPCMBuffer`-t készít.
+    /// Egyes enkóderek (pl. az MP3) interleaved bemenetet várnak.
+    public func toInterleavedAVAudioPCMBuffer() -> AVAudioPCMBuffer? {
+        guard channelCount > 0, frameCount > 0 else { return nil }
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: AVAudioChannelCount(channelCount),
+            interleaved: true
+        ) else { return nil }
+
+        guard let pcm = AVAudioPCMBuffer(pcmFormat: format,
+                                         frameCapacity: AVAudioFrameCount(frameCount)) else { return nil }
+        pcm.frameLength = AVAudioFrameCount(frameCount)
+
+        // Interleaved pufferben a 0. csatorna mutatója az összes mintát
+        // L0,R0,L1,R1,… sorrendben tartalmazza – épp ahogy a `samples` tömbben.
+        guard let channelData = pcm.floatChannelData else { return nil }
+        let dst = channelData[0]
+        for i in 0..<(frameCount * channelCount) {
+            dst[i] = samples[i]
+        }
+        return pcm
+    }
 }
