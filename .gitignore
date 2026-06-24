@@ -3,3 +3,6 @@
 *.xcuserstate
 xcuserdata/
 DerivedData/
+
+# Generált app bundle
+/dist/
