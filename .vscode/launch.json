@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:VoxBarber}",
+            "name": "Debug VoxBarber",
+            "target": "VoxBarber",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug VoxBarber"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:VoxBarber}",
+            "name": "Release VoxBarber",
+            "target": "VoxBarber",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release VoxBarber"
+        }
+    ]
+}

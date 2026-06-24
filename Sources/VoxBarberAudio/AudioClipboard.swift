@@ -1,5 +1,9 @@
 import Foundation
 
+public extension Notification.Name {
+    static let audioClipboardDidChange = Notification.Name("AudioClipboardDidChange")
+}
+
 /// App-szintű belső vágólap hangadatokhoz.
 ///
 /// Az OS rendszer-vágólapját nem használjuk PCM adatokra, mert az
@@ -35,6 +39,7 @@ public final class AudioClipboard {
     public func store(_ buffer: AudioBuffer, sourcePanelID: UUID? = nil) {
         self.buffer = buffer
         self.sourcePanelID = sourcePanelID
+        NotificationCenter.default.post(name: .audioClipboardDidChange, object: self)
     }
 
     /// Visszaadja a vágólap tartalmát anélkül, hogy törölné.
@@ -46,5 +51,6 @@ public final class AudioClipboard {
     public func clear() {
         buffer = nil
         sourcePanelID = nil
+        NotificationCenter.default.post(name: .audioClipboardDidChange, object: self)
     }
 }

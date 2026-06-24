@@ -12,7 +12,7 @@ import os
 ///  - eszköztárat (PLAY/PAUSE/STOP és COPY/CUT/PASTE csoportok)
 ///  - tartalom területet (hangforma megjelenítési helye)
 @MainActor
-final class DocumentPanelView: NSView, NSTextFieldDelegate {
+final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
 
     // MARK: – Layout konstansok
 
@@ -65,6 +65,11 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
     /// A "követés" toggle gomb – lenyomva tartja a kurzort a látható ablakban.
     private weak var followBtn: NSButton?
 
+    /// Szerkesztés toolbar gombok állapotkezeléshez.
+    private weak var copyButton: NSButton?
+    private weak var cutButton: NSButton?
+    private weak var pasteButton: NSButton?
+
     /// A stopper label – a lejátszási pozíciót mutatja HH:MM:SS.mmmm formában.
     private weak var timeLabel: NSTextField?
 
@@ -78,7 +83,11 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
 
     /// A kijelölés tartománya frame-ben (start, end). Nil = nincs kijelölés.
     var selectionRange: (start: Int, end: Int)? {
-        didSet { hasSelection = selectionRange != nil }
+        didSet {
+            hasSelection = selectionRange != nil
+            waveformView?.setSelection(selectionRange)
+            updateEditingButtonsState()
+        }
     }
 
     /// A lejátszási / beillesztési kurzor pozíciója frame-ben.
@@ -112,6 +121,13 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
     /// A jelölőpontok listáját megjelenítő ablak (egyszerre csak egy).
     private weak var markersWindow: NSWindow?
 
+    /// Az "időpontra ugrás" párbeszédablak (egyszerre csak egy).
+    /// Erős referencia: különben az ablak megsemmisülne, mielőtt megjelenne.
+    private var jumpTimeWindow: NSWindow?
+
+    /// Az "időpontra ugrás" ablak szövegmezője.
+    private weak var jumpTimeField: NSTextField?
+
     // MARK: – Callback
 
     /// A bezáró gomb megnyomásakor hívódik meg.
@@ -136,6 +152,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
         self.fileURL = fileURL
         super.init(frame: frame)
         buildView(title: title)
+        startObservingClipboardChanges()
         DocumentPanelView.allPanels.add(self)
         // Ha van fájl URL, betöltjük háttérben
         if let url = fileURL {
@@ -146,7 +163,12 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         buildView(title: "Ismeretlen")
+        startObservingClipboardChanges()
         DocumentPanelView.allPanels.add(self)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     // MARK: – Nézet felépítése
@@ -254,6 +276,8 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
         let pauseBtn = makeToolbarButton(symbol: "pause.fill", tooltip: "Szünet",     action: #selector(pauseTapped))
         let stopBtn  = makeToolbarButton(symbol: "stop.fill",  tooltip: "Leállítás",  action: #selector(stopTapped))
         let jumpBtn  = makeToolbarButton(symbol: "forward.end.fill", tooltip: "Ugrás a következő jelölőpontra", action: #selector(jumpToNextMarkerTapped))
+        let jumpToEndBtn = makeToolbarButton(symbol: "chevron.right.2", tooltip: "Ugrás a fájl végére", action: #selector(jumpToEndTapped))
+        let jumpTimeBtn = makeToolbarButton(symbol: "clock.arrow.circlepath", tooltip: "Ugrás időpontra", action: #selector(jumpToTimeTapped))
 
         // Hangerő ikon + csúzka
         let volIcon = NSImageView()
@@ -282,6 +306,9 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
         let copyBtn  = makeToolbarButton(symbol: "doc.on.doc",        tooltip: "Másol",     action: #selector(copyTapped))
         let cutBtn   = makeToolbarButton(symbol: "scissors",          tooltip: "Kivág",     action: #selector(cutTapped))
         let pasteBtn = makeToolbarButton(symbol: "doc.on.clipboard",  tooltip: "Beilleszt", action: #selector(pasteTapped))
+        self.copyButton = copyBtn
+        self.cutButton = cutBtn
+        self.pasteButton = pasteBtn
 
         // Jobb csoport: zoom + scroll vezérlők
         let followToggle = NSButton(title: "", target: self, action: #selector(followTapped))
@@ -333,7 +360,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
         sep3.wantsLayer = true
         sep3.layer?.backgroundColor = NSColor(white: 0.35, alpha: 1.0).cgColor
 
-        for v in [playBtn, pauseBtn, stopBtn, jumpBtn, volIcon, volSlider, sep1, markerBtn, copyBtn, cutBtn, pasteBtn, sep2, followToggle, zoomInBtn, zoomOutBtn, scrollLeftBtn, scrollRightBtn, sep3, infoBtn] {
+        for v in [playBtn, pauseBtn, stopBtn, jumpBtn, jumpToEndBtn, jumpTimeBtn, volIcon, volSlider, sep1, markerBtn, copyBtn, cutBtn, pasteBtn, sep2, followToggle, zoomInBtn, zoomOutBtn, scrollLeftBtn, scrollRightBtn, sep3, infoBtn] {
             toolbar.addSubview(v)
         }
 
@@ -351,7 +378,13 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
             jumpBtn.leadingAnchor.constraint(equalTo: stopBtn.trailingAnchor, constant: 4),
             jumpBtn.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
 
-            volIcon.leadingAnchor.constraint(equalTo: jumpBtn.trailingAnchor, constant: 8),
+            jumpToEndBtn.leadingAnchor.constraint(equalTo: jumpBtn.trailingAnchor, constant: 4),
+            jumpToEndBtn.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
+            jumpTimeBtn.leadingAnchor.constraint(equalTo: jumpToEndBtn.trailingAnchor, constant: 4),
+            jumpTimeBtn.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
+            volIcon.leadingAnchor.constraint(equalTo: jumpTimeBtn.trailingAnchor, constant: 8),
             volIcon.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
 
             volSlider.leadingAnchor.constraint(equalTo: volIcon.trailingAnchor, constant: 4),
@@ -408,6 +441,29 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
             infoBtn.leadingAnchor.constraint(equalTo: sep3.trailingAnchor, constant: 12),
             infoBtn.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor)
         ])
+
+        updateEditingButtonsState()
+    }
+
+    /// A szerkesztés gombok állapotát szinkronban tartja a kijelöléssel és a vágólappal.
+    private func updateEditingButtonsState() {
+        let hasSelection = selectionRange != nil
+        copyButton?.isEnabled = hasSelection
+        cutButton?.isEnabled = hasSelection
+        pasteButton?.isEnabled = AudioClipboard.shared.hasContent
+    }
+
+    private func startObservingClipboardChanges() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(clipboardDidChange),
+            name: .audioClipboardDidChange,
+            object: nil
+        )
+    }
+
+    @objc private func clipboardDidChange() {
+        updateEditingButtonsState()
     }
 
     /// SF Symbol alapú toolbar gombot hoz létre.
@@ -455,6 +511,11 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
         // Kattintás a hangformára → kurzor / lejátszás ugratás
         wv.onSeek = { [weak self] frame in
             self?.seek(toFrame: frame)
+        }
+
+        // Jobb egérgombos húzás a hangformán → kijelölés
+        wv.onSelectionChanged = { [weak self] range in
+            self?.selectionRange = range
         }
 
         // Átméretező fogantyú (jobb alsó sarok)
@@ -613,6 +674,14 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
     /// és ha a követés aktív, lapoz, ha a kurzor elhagyja a látható ablakot.
     private func tickTimer() {
         let frame = AudioEngine.shared.currentPlaybackFrame()
+
+        // A lejátszás elérte (vagy túllépte) a hangfájl végét: leállítjuk a stoppert
+        // és a lejátszást, különben a timer a fájl vége után is tovább pörögne.
+        if audioBuffer.frameCount > 0, frame >= audioBuffer.frameCount {
+            handlePlaybackReachedEnd()
+            return
+        }
+
         cursorFrame = frame
         timeLabel?.stringValue = formatPlaybackTime(frame: frame)
         waveformView?.setCursorFrame(frame)
@@ -636,6 +705,17 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
                 rulerView?.setScrollOffset(newOffset)
             }
         }
+    }
+
+    /// A lejátszás a fájl végére ért: megállítja a stoppert és a lejátszást,
+    /// a kurzort a fájl végére állítja.
+    private func handlePlaybackReachedEnd() {
+        stopPlaybackTimer()
+        if DocumentPanelView.playing === self { DocumentPanelView.playing = nil }
+        AudioEngine.shared.stop()
+        cursorFrame = audioBuffer.frameCount
+        timeLabel?.stringValue = formatPlaybackTime(frame: cursorFrame)
+        waveformView?.setCursorFrame(cursorFrame)
     }
 
     /// Frame-számot alakít HH:MM:SS.mmmm formátummá.
@@ -734,6 +814,159 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
         seek(toFrame: target)
     }
 
+    /// Ugrás a fájl végére: a kurzort (és lejátszás közben a lejátszást is)
+    /// a hangállomány utolsó frame pozíciójára állítja.
+    @objc private func jumpToEndTapped() {
+        seek(toFrame: audioBuffer.frameCount)
+    }
+
+    /// Időpontra ugrás: megnyit egy kis ablakot, ahol óra.perc.másodperc.ezredmp
+    /// formában meg lehet adni a célpozíciót. A gomb megnyomásakor – ha szólt a
+    /// zene – a lejátszás leáll.
+    @objc private func jumpToTimeTapped() {
+        // Ha szól a zene, állítsuk le.
+        if isPlaying {
+            stopPlaybackTimer()
+            cursorFrame = AudioEngine.shared.currentPlaybackFrame()
+            timeLabel?.stringValue = formatPlaybackTime(frame: cursorFrame)
+            waveformView?.setCursorFrame(cursorFrame)
+            if DocumentPanelView.playing === self { DocumentPanelView.playing = nil }
+            AudioEngine.shared.pause()
+        }
+
+        // Ha már nyitva van, frissítsük a mezőt és hozzuk előtérbe.
+        if let panel = jumpTimeWindow {
+            jumpTimeField?.stringValue = formatPlaybackTime(frame: cursorFrame)
+            panel.makeKeyAndOrderFront(nil)
+            if let field = jumpTimeField { panel.makeFirstResponder(field) }
+            return
+        }
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 0),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: true
+        )
+        panel.title = "Ugrás időpontra"
+        panel.level = .floating
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.delegate = self
+        jumpTimeWindow = panel
+
+        let field = NSTextField(string: formatPlaybackTime(frame: cursorFrame))
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.placeholderString = "ó.p.mp.ezred"
+        field.alignment = .center
+        field.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        field.target = self
+        field.action = #selector(jumpTimeConfirmed)
+        jumpTimeField = field
+
+        let okBtn = NSButton(title: "OKÉ", target: self, action: #selector(jumpTimeConfirmed))
+        okBtn.translatesAutoresizingMaskIntoConstraints = false
+        okBtn.bezelStyle = .rounded
+        okBtn.keyEquivalent = "\r"
+
+        let stack = NSStackView(views: [field, okBtn])
+        stack.orientation = .horizontal
+        stack.alignment   = .centerY
+        stack.spacing     = 10
+        stack.edgeInsets  = NSEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView()
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            field.widthAnchor.constraint(greaterThanOrEqualToConstant: 150)
+        ])
+
+        panel.contentView = container
+        panel.setContentSize(stack.fittingSize)
+        panel.initialFirstResponder = field
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    /// Az OKÉ gomb / Enter hatása: feldolgozza a beírt időpontot, odaugrik, és
+    /// bezárja a párbeszédablakot.
+    @objc private func jumpTimeConfirmed() {
+        guard let text = jumpTimeField?.stringValue else { return }
+        if let seconds = Self.parseJumpTime(text) {
+            let sr = audioBuffer.sampleRate > 0 ? audioBuffer.sampleRate : 44100
+            let frame = Int((seconds * sr).rounded())
+            seek(toFrame: frame)
+            jumpTimeWindow?.close()
+            jumpTimeWindow = nil
+        } else {
+            NSSound.beep()
+        }
+    }
+
+    /// Az ablak bezárásakor (a piros gombbal is) nullázzuk a referenciát.
+    func windowWillClose(_ notification: Notification) {
+        if let win = notification.object as? NSWindow, win === jumpTimeWindow {
+            jumpTimeWindow = nil
+        }
+    }
+
+    /// Feldolgozza az `óra.perc.másodperc.ezredmásodperc` formátumú időpontot
+    /// másodpercre. Az elválasztó lehet pont vagy kettőspont, kivéve az utolsót
+    /// (az ezredmásodperc előtt), amely csak pont lehet.
+    /// - Returns: A másodpercben kifejezett időpont, vagy nil érvénytelen bemenetnél.
+    static func parseJumpTime(_ input: String) -> Double? {
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
+        // Az utolsó elválasztó (az ezredmásodperc előtt) csak pont lehet.
+        guard let lastDot = trimmed.lastIndex(of: ".") else { return nil }
+        // Az ezredmásodperc rész nem tartalmazhat további elválasztót.
+        let afterLast = trimmed[trimmed.index(after: lastDot)...]
+        guard !afterLast.contains(":"), !afterLast.contains(".") else { return nil }
+
+        let head = String(trimmed[..<lastDot])
+        let millisPart = String(afterLast)
+        guard !millisPart.isEmpty else { return nil }
+
+        // A fej részben pont és kettőspont is lehet elválasztó.
+        let headComponents = head.split(whereSeparator: { $0 == "." || $0 == ":" }).map(String.init)
+        guard headComponents.count >= 1, headComponents.count <= 3 else { return nil }
+
+        // Minden komponens csak számjegy lehet.
+        func intValue(_ s: String) -> Int? {
+            guard !s.isEmpty, s.allSatisfy(\.isNumber) else { return nil }
+            return Int(s)
+        }
+
+        // A fej: [óra, perc, másodperc] – a komponensek száma szerint.
+        var hours = 0, minutes = 0, secs = 0
+        switch headComponents.count {
+        case 1:
+            guard let s = intValue(headComponents[0]) else { return nil }
+            secs = s
+        case 2:
+            guard let m = intValue(headComponents[0]),
+                  let s = intValue(headComponents[1]) else { return nil }
+            minutes = m; secs = s
+        default: // 3
+            guard let h = intValue(headComponents[0]),
+                  let m = intValue(headComponents[1]),
+                  let s = intValue(headComponents[2]) else { return nil }
+            hours = h; minutes = m; secs = s
+        }
+
+        // Ezredmásodperc: legfeljebb 4 számjegy (0.0001 mp felbontás).
+        guard millisPart.allSatisfy(\.isNumber), millisPart.count <= 4 else { return nil }
+        let fraction = Double("0." + millisPart) ?? 0
+
+        return Double(hours) * 3600 + Double(minutes) * 60 + Double(secs) + fraction
+    }
+
     /// A toolbar MARKER+ gombja: új jelölőpontot tesz a kurzorpozícióra.
     @objc private func addMarkerTapped() {
         addMarkerAtCursor()
@@ -752,17 +985,32 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
         let clip = audioBuffer.slice(from: range.start, to: range.end)
         AudioClipboard.shared.store(clip, sourcePanelID: panelID)
         audioBuffer = audioBuffer.deleting(from: range.start, to: range.end)
-        cursorFrame = range.start
+        cursorFrame = max(0, min(audioBuffer.frameCount, range.start))
         selectionRange = nil
-        // TODO: waveform újrarajzolás
+        waveformView?.setBuffer(audioBuffer, zoom: zoomLevel)
+        rulerView?.configure(sampleRate: audioBuffer.sampleRate,
+                             frameCount: audioBuffer.frameCount,
+                             zoom: zoomLevel)
+        waveformView?.setCursorFrame(cursorFrame)
+        refreshMarkerOverlay()
     }
 
     @objc func pasteTapped() {
         guard let clip = AudioClipboard.shared.peek() else { return }
-        audioBuffer = audioBuffer.inserting(clip, at: cursorFrame)
-        cursorFrame += clip.frameCount
+        let insertionFrame = max(0, min(audioBuffer.frameCount, cursorFrame))
+        let wasEmptyBuffer = audioBuffer.frameCount == 0
+
+        audioBuffer = audioBuffer.inserting(clip, at: insertionFrame)
+        // Üres dokumentumba illesztéskor a lejátszás azonnal induljon Play-re,
+        // ezért a kurzort a frissen beillesztett rész elején tartjuk.
+        cursorFrame = wasEmptyBuffer ? insertionFrame : insertionFrame + clip.frameCount
         selectionRange = nil
-        // TODO: waveform újrarajzolás
+        waveformView?.setBuffer(audioBuffer, zoom: zoomLevel)
+        rulerView?.configure(sampleRate: audioBuffer.sampleRate,
+                             frameCount: audioBuffer.frameCount,
+                             zoom: zoomLevel)
+        waveformView?.setCursorFrame(cursorFrame)
+        refreshMarkerOverlay()
     }
 
     // MARK: – Jelölőpont akciók
@@ -1318,9 +1566,11 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate {
     // MARK: – Hangfájl betöltés
 
     /// Aszinkron betölti a hangfájlt az `AudioEngine` segítségével.
+    /// A dekódolás háttér-szálon fut (`Task.detached`), így soha nem fagyasztja a
+    /// felhasználói felületet; a puffer beállítása a fő szálon történik.
     func loadAudio(from url: URL) {
         self.fileURL = url
-        Task {
+        Task.detached {
             do {
                 let buffer = try AudioEngine.shared.load(url: url)
                 await MainActor.run {

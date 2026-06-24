@@ -51,6 +51,7 @@ final class SplashWindowController: NSWindowController {
         startButton.translatesAutoresizingMaskIntoConstraints = false
         startButton.bezelStyle = .regularSquare
         startButton.isBordered = false
+        startButton.focusRingType = .none
         startButton.wantsLayer = true
         startButton.layer?.backgroundColor = NSColor.systemBlue.cgColor
         startButton.layer?.cornerRadius = 8

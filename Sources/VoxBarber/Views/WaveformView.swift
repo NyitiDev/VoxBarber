@@ -32,12 +32,22 @@ final class WaveformView: NSView {
     private var dragAnchorOffset: Double  = 0
     private var didDrag:          Bool    = false   // panning történt-e (vs. tiszta kattintás)
 
+    // Kijelölés (jobb egérgomb) állapot – frame-pozíciók a teljes pufferben
+    private var selectionStart:   Int?    = nil
+    private var selectionEnd:     Int?    = nil
+    private var isSelecting:      Bool    = false
+    private var selectionAnchor:  Int     = 0
+
     /// Scroll-esemény értesítő: az új offset másodpercben.
     var onScrollOffsetChanged: ((Double) -> Void)?
 
     /// Kattintás-esemény értesítő: a kattintott pozíció frame-ben.
     /// Csak akkor hívódik, ha a felhasználó kattintott (nem húzott).
     var onSeek: ((Int) -> Void)?
+
+    /// Kijelölés-változás értesítő: a kijelölt tartomány (start, end) frame-ben,
+    /// vagy nil, ha a kijelölés megszűnt.
+    var onSelectionChanged: (((start: Int, end: Int)?) -> Void)?
 
     /// Az aktuális scroll offset (másodperc) – olvasható kívülről.
     var currentScrollOffset: Double { scrollOffsetSec }
@@ -52,6 +62,19 @@ final class WaveformView: NSView {
     func setMarkerFrames(_ frames: [Int], names: [String] = []) {
         markerFrames = frames
         markerNames  = names
+        needsDisplay = true
+    }
+
+    /// Beállítja (vagy törli) a kijelölt tartományt kívülről. Nem vált ki
+    /// `onSelectionChanged` értesítést – csak a megjelenítést frissíti.
+    func setSelection(_ range: (start: Int, end: Int)?) {
+        if let r = range, r.end > r.start {
+            selectionStart = min(r.start, r.end)
+            selectionEnd   = max(r.start, r.end)
+        } else {
+            selectionStart = nil
+            selectionEnd   = nil
+        }
         needsDisplay = true
     }
 
@@ -151,8 +174,36 @@ final class WaveformView: NSView {
         }
         // Jelölőpontok overlay (a kurzor alatt)
         drawMarkers(ctx: ctx)
+        // Kijelölés overlay (a markerek és kurzor alatt)
+        drawSelection(ctx: ctx)
         // Lejátszási kurzor overlay
         drawCursor(ctx: ctx)
+    }
+
+    /// Kirajzolja a kijelölt tartományt áttetsző, a kurzortól/markerektől eltérő
+    /// (kék) színnel, ha a látható ablakba esik.
+    private func drawSelection(ctx: CGContext) {
+        guard let s = selectionStart, let e = selectionEnd, e > s,
+              storedSampleRate > 0, storedFrameCount > 0, bounds.width > 1 else { return }
+        let totalDuration   = Double(storedFrameCount) / storedSampleRate
+        let visibleDuration = totalDuration / max(1.0, currentZoom)
+        guard visibleDuration > 0 else { return }
+
+        let startRel = Double(s) / storedSampleRate - scrollOffsetSec
+        let endRel   = Double(e) / storedSampleRate - scrollOffsetSec
+        // Vágás a látható tartományra
+        let clampedStart = max(0, min(visibleDuration, startRel))
+        let clampedEnd   = max(0, min(visibleDuration, endRel))
+        let x0 = CGFloat(clampedStart / visibleDuration) * bounds.width
+        let x1 = CGFloat(clampedEnd   / visibleDuration) * bounds.width
+        guard x1 > x0 else { return }
+
+        let rect = CGRect(x: x0, y: 0, width: x1 - x0, height: bounds.height)
+        ctx.setFillColor(CGColor(red: 0.30, green: 0.58, blue: 1.0, alpha: 0.28))
+        ctx.fill(rect)
+        ctx.setStrokeColor(CGColor(red: 0.40, green: 0.70, blue: 1.0, alpha: 0.90))
+        ctx.setLineWidth(1.0)
+        ctx.stroke(rect.insetBy(dx: 0.5, dy: 0.5))
     }
 
     /// Kirajzolja a jelölőpontokat feltűnő függőleges vonalakkal (a kurzortól
@@ -312,6 +363,54 @@ final class WaveformView: NSView {
             scheduleRender()
         }
         super.mouseUp(with: event)
+    }
+
+    // MARK: – Egér (kijelölés jobb gombbal)
+
+    override func rightMouseDown(with event: NSEvent) {
+        // A szülőpanel fókuszba hozása (a bal gombbal azonos módon)
+        nextResponder?.mouseDown(with: event)
+        let loc = convert(event.locationInWindow, from: nil)
+        guard let frame = frameAt(x: loc.x) else { return }
+        isSelecting    = true
+        selectionAnchor = frame
+        selectionStart = frame
+        selectionEnd   = frame
+        needsDisplay   = true
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        guard isSelecting else {
+            super.rightMouseDragged(with: event)
+            return
+        }
+        let loc = convert(event.locationInWindow, from: nil)
+        guard let frame = frameAt(x: loc.x) else { return }
+        selectionStart = min(selectionAnchor, frame)
+        selectionEnd   = max(selectionAnchor, frame)
+        needsDisplay   = true
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        guard isSelecting else {
+            super.rightMouseUp(with: event)
+            return
+        }
+        isSelecting = false
+        let loc = convert(event.locationInWindow, from: nil)
+        if let frame = frameAt(x: loc.x) {
+            selectionStart = min(selectionAnchor, frame)
+            selectionEnd   = max(selectionAnchor, frame)
+        }
+        if let s = selectionStart, let e = selectionEnd, e > s {
+            onSelectionChanged?((start: s, end: e))
+        } else {
+            // Üres tartomány (egyszerű kattintás) → kijelölés törlése
+            selectionStart = nil
+            selectionEnd   = nil
+            onSelectionChanged?(nil)
+        }
+        needsDisplay = true
     }
 
     /// A nézet x-koordinátájához tartozó frame-pozíciót adja vissza (teljes pufferben).

@@ -40,7 +40,10 @@ public final class AudioEngine {
 
     /// Betölti a fájlt és visszaadja az `AudioBuffer`-t.
     /// SFBAudioEngine végzi a dekódolást – WAV, MP3, AAC, FLAC, OGG, Opus, stb.
-    public func load(url: URL) throws -> AudioBuffer {
+    /// `nonisolated`: a dekódolás CPU-munka, háttér-threaden kell futnia, soha nem
+    /// a fő szálon, különben a `decode(into:)` blokkolja a felhasználói felületet.
+    nonisolated public func load(url: URL) throws -> AudioBuffer {
+        let log = Logger(subsystem: "VoxBarber", category: "AudioEngine")
         let decoder = try AudioDecoder(url: url)
         try decoder.open()
         defer {
@@ -54,33 +57,39 @@ public final class AudioEngine {
         let channelCount = Int(decoder.processingFormat.channelCount)
         let sampleRate   = decoder.processingFormat.sampleRate
 
-        // Float32, non-interleaved formátum az AVAudioPCMBuffer-hez
-        guard let readFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sampleRate,
-            channels: AVAudioChannelCount(channelCount),
-            interleaved: false
-        ) else { throw AudioEngineError.formatConversionFailed }
+        // A puffert pontosan a dekóder feldolgozási formátumával hozzuk létre –
+        // a `decode(into:)` megköveteli, hogy `buffer.format == processingFormat`,
+        // különben `NSInternalInconsistencyException`-t dob (format mismatch).
+        let processingFormat = decoder.processingFormat
+        let isInterleaved    = processingFormat.isInterleaved
 
         let frameCapacity: AVAudioFrameCount = 4096
-        guard let tempBuffer = AVAudioPCMBuffer(pcmFormat: readFormat,
+        guard let tempBuffer = AVAudioPCMBuffer(pcmFormat: processingFormat,
                                                 frameCapacity: frameCapacity)
         else { throw AudioEngineError.bufferAllocationFailed }
 
         var allSamples = [Float]()
 
-        // Dekódolás blokkokban – decode(into:) tölti fel a puffert
+        // Dekódolás blokkokban – decode(into:length:) tölti fel a puffert.
+        // Fontos: a frameLength-et 0-ra kell állítani a hívás előtt, mert a dekóder
+        // a frameLength pozíciótól ír; ha az a kapacitással egyenlő, 0 frame-et olvas.
         while true {
-            tempBuffer.frameLength = frameCapacity          // maximális kapacitás jelzése
-            try decoder.decode(into: tempBuffer)            // tényleges dekódolás
+            tempBuffer.frameLength = 0
+            try decoder.decode(into: tempBuffer, length: frameCapacity)
             let framesRead = Int(tempBuffer.frameLength)
             guard framesRead > 0 else { break }
 
             guard let channelData = tempBuffer.floatChannelData else { break }
-            // Non-interleaved → interleaved (L0,R0,L1,R1,…)
-            for frame in 0..<framesRead {
-                for ch in 0..<channelCount {
-                    allSamples.append(channelData[ch][frame])
+            if isInterleaved {
+                // Interleaved → már L0,R0,L1,R1,… sorrendben egyetlen pufferben
+                let ptr = channelData[0]
+                allSamples.append(contentsOf: UnsafeBufferPointer(start: ptr, count: framesRead * channelCount))
+            } else {
+                // Non-interleaved → interleaved (L0,R0,L1,R1,…)
+                for frame in 0..<framesRead {
+                    for ch in 0..<channelCount {
+                        allSamples.append(channelData[ch][frame])
+                    }
                 }
             }
         }
