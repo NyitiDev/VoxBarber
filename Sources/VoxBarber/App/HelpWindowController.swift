@@ -257,6 +257,15 @@ final class HelpWindowController: NSWindowController {
                     vágólapra helyezése; a „maradék” összezárul.</li>
                 <li><strong>Paste</strong> – a vágólap tartalmának beillesztése a lejátszás
                     vonalának pozíciójára. Csak akkor aktív, ha van a vágólapon tartalom.</li>
+                <li><strong>Összemosás</strong> – a vágólapon levő részlet <em>belekeverése</em>
+                    a meglévő hangba a lejátszás vonalának pozíciójától. A beillesztéssel
+                    ellentétben az összemosás nem tolja el a hangot: a két jel összeadódik,
+                    így a meglévő szakaszon egyszerre szól a két hang. Ha a beillesztett
+                    részlet túlnyúlik a fájl végén, a hang ezzel a túllógó résszel
+                    meghosszabbodik (ott már csak a beillesztett anyag szól).
+                    A <em>Szerkesztés › Összemos</em> menüponttal vagy az eszköztár
+                    összemosás gombjával érhető el; csak akkor aktív, ha van a vágólapon tartalom.
+                    Az összemosás kezdetét és végét két jelölőpont jelzi.</li>
             </ul>
         </div>
         <p class="tip">
@@ -281,7 +290,20 @@ final class HelpWindowController: NSWindowController {
             <li><strong>Listázás</strong> – a <em>Szerkesztés › Jelölőpontok listája</em>
                 menüponttal megnyithatsz egy ablakot, amelyben időrendben látod az összes
                 jelölőt. Itt átnevezheted, törölheted őket, illetve a listából a kívánt
-                jelölőre navigálhatsz.</li>
+                jelölőre navigálhatsz. Az ablak alján a <kbd>Bezár</kbd> gombbal zárhatod be.</li>
+            <li><strong>Színezés</strong> – a jelölőpontok listájában minden sorhoz tartozik
+                egy színválasztó. Az itt megadott szín azt jelenti, hogy attól a jelölőponttól
+                kezdve a hanghullám ezzel a színnel rajzolódik ki (a következő színes jelölőig).
+                Az alapértelmezett hullámszín kék (RGB ≈ 64, 166, 255, 85% átlátszatlanság).</li>
+            <li><strong>Mentés és betöltés</strong> – a jelölőpontok listája ablak alján a
+                <kbd>Mentés…</kbd> gombbal a jelölőket önálló <strong>VBM</strong>
+                (<span class="muted">.vbm</span>) fájlba mentheted (név, pozíció és szín együtt),
+                a <kbd>Betöltés…</kbd> gombbal pedig visszatöltheted őket. Ha már vannak
+                jelölőpontok, a betöltéskor választhatsz a módok közül:
+                <em>Újratöltés</em> (a meglévők törlése), <em>Visszatöltés</em>
+                (egyezésnél a betöltött név nyer) és <em>Összemosás</em>
+                (egyezésnél a meglévő név marad). A betöltés a
+                <em>Fájl</em> menüből is elérhető.</li>
             <li><strong>Ugrás jelölőre</strong> – az eszköztár
                 <strong>Ugrás a következő jelölőre</strong> gombja a lejátszás vonalát az
                 aktuális pozíció utáni első jelölőre helyezi (a végén körbeugorva az elsőre).</li>

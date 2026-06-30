@@ -1,6 +1,16 @@
 import AppKit
 import VoxBarberAudio
 
+/// Egy szín-stop a hanghullám szakaszos színezéséhez: a `frame` pozíciótól
+/// kezdve (a következő stopig) a megadott RGBA színnel rajzoljuk a hullámot.
+struct WaveformColorStop: Sendable {
+    let frame: Int
+    let r: CGFloat
+    let g: CGFloat
+    let b: CGFloat
+    let a: CGFloat
+}
+
 /// Hanghullám megjelenítő nézet.
 ///
 /// Teljesítmény-stratégia:
@@ -26,6 +36,7 @@ final class WaveformView: NSView {
     private var cursorFrame:         Int = -1         // -1 = rejtett
     private var markerFrames:        [Int] = []       // jelölőpontok frame-pozíciói
     private var markerNames:         [String] = []    // jelölőpontok nevei (frame-ekkel azonos sorrendben)
+    private var colorStops:          [WaveformColorStop] = []  // szakaszos hullámszínezés (frame szerint rendezve)
 
     // Drag (panning) állapot
     private var dragAnchorX:      CGFloat = 0
@@ -37,6 +48,8 @@ final class WaveformView: NSView {
     private var selectionEnd:     Int?    = nil
     private var isSelecting:      Bool    = false
     private var selectionAnchor:  Int     = 0
+    private var lastRightClickTime: TimeInterval = 0
+    private var lastRightClickX: CGFloat? = nil
 
     /// Scroll-esemény értesítő: az új offset másodpercben.
     var onScrollOffsetChanged: ((Double) -> Void)?
@@ -59,9 +72,22 @@ final class WaveformView: NSView {
     }
 
     /// Beállítja a kirajzolandó jelölőpontok frame-pozícióit és neveit.
-    func setMarkerFrames(_ frames: [Int], names: [String] = []) {
+    /// A `colors` (ha a frame-ekkel azonos hosszú) megadja, hogy az egyes
+    /// jelölőpontoktól kezdve milyen színnel rajzoljuk a hanghullámot.
+    func setMarkerFrames(_ frames: [Int],
+                         names: [String] = [],
+                         colors: [(CGFloat, CGFloat, CGFloat, CGFloat)] = []) {
         markerFrames = frames
         markerNames  = names
+        if colors.count == frames.count {
+            colorStops = zip(frames, colors)
+                .map { WaveformColorStop(frame: $0.0, r: $0.1.0, g: $0.1.1, b: $0.1.2, a: $0.1.3) }
+                .sorted { $0.frame < $1.frame }
+        } else {
+            colorStops = []
+        }
+        // A hullám színezése a cached képbe renderelődik, ezért újra kell renderelni.
+        scheduleRender()
         needsDisplay = true
     }
 
@@ -289,6 +315,7 @@ final class WaveformView: NSView {
         let zoom         = currentZoom
         let scrollOffset = scrollOffsetSec
         let sampleRate   = storedSampleRate
+        let stops        = colorStops
 
         renderTask = Task.detached(priority: .userInitiated) {
             guard !Task.isCancelled else { return }
@@ -299,7 +326,8 @@ final class WaveformView: NSView {
                 zoom: zoom,
                 scrollOffset: scrollOffset,
                 sampleRate: sampleRate,
-                size: size
+                size: size,
+                colorStops: stops
             )
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
@@ -372,6 +400,7 @@ final class WaveformView: NSView {
         nextResponder?.mouseDown(with: event)
         let loc = convert(event.locationInWindow, from: nil)
         guard let frame = frameAt(x: loc.x) else { return }
+
         isSelecting    = true
         selectionAnchor = frame
         selectionStart = frame
@@ -399,8 +428,32 @@ final class WaveformView: NSView {
         isSelecting = false
         let loc = convert(event.locationInWindow, from: nil)
         if let frame = frameAt(x: loc.x) {
+            // Több rendszerben a secondary click clickCount nem megbízható, ezért
+            // időalapú dupla-jobb-klikk felismerést is használunk.
+            let interval = event.timestamp - lastRightClickTime
+            let withinDoubleClickWindow = interval > 0 && interval <= NSEvent.doubleClickInterval
+            let nearPreviousClick = {
+                guard let prevX = lastRightClickX else { return false }
+                return abs(prevX - loc.x) <= 12
+            }()
+            let isDoubleRightClick = event.clickCount >= 2 || (withinDoubleClickWindow && nearPreviousClick)
+            if isDoubleRightClick, let range = markerBoundedSelection(around: frame) {
+                selectionStart = range.start
+                selectionEnd   = range.end
+                onSelectionChanged?(range)
+                needsDisplay = true
+                lastRightClickTime = 0
+                lastRightClickX = nil
+                return
+            }
+
             selectionStart = min(selectionAnchor, frame)
             selectionEnd   = max(selectionAnchor, frame)
+
+            // Egy egyszerű jobb-klikket eltárolunk, hogy a következő kattintásnál
+            // fallback módban felismerhető legyen a dupla-klikk.
+            lastRightClickTime = event.timestamp
+            lastRightClickX = loc.x
         }
         if let s = selectionStart, let e = selectionEnd, e > s {
             onSelectionChanged?((start: s, end: e))
@@ -424,6 +477,45 @@ final class WaveformView: NSView {
         return max(0, min(storedFrameCount, frame))
     }
 
+    /// Visszaadja a kattintási frame előtti legközelebbi és az utána következő
+    /// marker közötti tartományt.
+    ///
+    /// Speciális eset: ha pontosan egy marker van, akkor
+    /// - marker elé kattintva: [0, marker]
+    /// - marker mögé kattintva: [marker, fájl vége]
+    /// Egyébként, ha nincs mindkét oldalon marker, nil.
+    private func markerBoundedSelection(around frame: Int) -> (start: Int, end: Int)? {
+        if markerFrames.count == 1 {
+            let marker = markerFrames[0]
+            if frame < marker {
+                let end = min(max(0, marker), storedFrameCount)
+                return end > 0 ? (start: 0, end: end) : nil
+            }
+            if frame > marker {
+                let start = min(max(0, marker), storedFrameCount)
+                return storedFrameCount > start ? (start: start, end: storedFrameCount) : nil
+            }
+            return nil
+        }
+
+        guard markerFrames.count >= 2 else { return nil }
+        let sorted = markerFrames.sorted()
+
+        var left: Int?
+        var right: Int?
+        for marker in sorted {
+            if marker < frame {
+                left = marker
+            } else if marker > frame {
+                right = marker
+                break
+            }
+        }
+
+        guard let start = left, let end = right, end > start else { return nil }
+        return (start: start, end: end)
+    }
+
     override func resetCursorRects() {
         if currentZoom > 1.0 {
             addCursorRect(bounds, cursor: .openHand)
@@ -439,7 +531,8 @@ final class WaveformView: NSView {
         zoom:         Double,
         scrollOffset: Double,
         sampleRate:   Double,
-        size:         CGSize
+        size:         CGSize,
+        colorStops:   [WaveformColorStop]
     ) -> CGImage? {
         let w = Int(size.width)
         let h = Int(size.height)
@@ -474,14 +567,28 @@ final class WaveformView: NSView {
         let visibleFrames    = Double(frameCount) / max(1.0, zoom)
         let framesPerPixel   = max(1.0, visibleFrames / Double(w))
 
-        // Waveform szín
-        ctx.setFillColor(CGColor(red: 0.25, green: 0.65, blue: 1.0, alpha: 0.85))
+        // Alapértelmezett hullámszín (RGB ≈ 64, 166, 255), 85% átlátszatlanság.
+        let defR: CGFloat = 0.25, defG: CGFloat = 0.65, defB: CGFloat = 1.0, defA: CGFloat = 0.85
+        // A színstopok frame szerint rendezettek; mivel a startFrame oszloponként
+        // monoton nő, egy mutatóval végighaladhatunk rajtuk.
+        var stopIdx = 0
+        var curR = defR, curG = defG, curB = defB, curA = defA
 
         for col in 0..<w {
             if Task.isCancelled { return nil }
 
             let startFrame = min(max(0, frameCount - 1), scrollFrames + Int(Double(col) * framesPerPixel))
             let endFrame   = min(frameCount, max(startFrame + 1, scrollFrames + Int(Double(col + 1) * framesPerPixel)))
+
+            // A szakaszhoz tartozó szín kiválasztása (utolsó stop, amelynek frame ≤ startFrame).
+            while stopIdx < colorStops.count && colorStops[stopIdx].frame <= startFrame {
+                curR = colorStops[stopIdx].r
+                curG = colorStops[stopIdx].g
+                curB = colorStops[stopIdx].b
+                curA = colorStops[stopIdx].a
+                stopIdx += 1
+            }
+            ctx.setFillColor(CGColor(red: curR, green: curG, blue: curB, alpha: curA))
 
             var mn: Float =  0.0
             var mx: Float =  0.0

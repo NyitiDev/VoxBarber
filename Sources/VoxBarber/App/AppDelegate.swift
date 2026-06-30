@@ -116,6 +116,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             action: #selector(pasteAudio),
             keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem(
+            title: "Összemos",
+            action: #selector(mixAudio),
+            keyEquivalent: ""))
+        editMenu.addItem(NSMenuItem(
             title: "Töröl",
             action: #selector(deleteAudio),
             keyEquivalent: ""))
@@ -291,11 +295,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return options[selected]
     }
 
-    // ── Lejátszás akciók (stub – hangmotor implementálásáig) ─────────────
+    // ── Lejátszás akciók ─────────────────────────────────────────────────
 
-    @objc private func playFromStart() {}
-    @objc private func playSelection() {}
-    @objc private func playFromCursor() {}
+    @objc private func playFromStart() {
+        DocumentPanelView.focused?.playFromStartMenu()
+    }
+    @objc private func playSelection() {
+        DocumentPanelView.focused?.playSelectionMenu()
+    }
+    @objc private func playFromCursor() {
+        DocumentPanelView.focused?.playFromCursorMenu()
+    }
 
     // ── Szerkesztés akciók ────────────────────────────────────────────────
 
@@ -307,6 +317,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     @objc private func pasteAudio() {
         DocumentPanelView.focused?.pasteTapped()
+    }
+    @objc private func mixAudio() {
+        DocumentPanelView.focused?.mixTapped()
     }
     @objc private func deleteAudio() {
         guard let panel = DocumentPanelView.focused,
@@ -349,6 +362,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case #selector(copyAudio), #selector(cutAudio), #selector(deleteAudio):
             return hasSelection
         case #selector(pasteAudio):
+            return hasPanel && AudioClipboard.shared.hasContent
+        case #selector(mixAudio):
             return hasPanel && AudioClipboard.shared.hasContent
         case #selector(addMarker):
             return hasPanel
@@ -412,7 +427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         alert.messageText = "Szerzői jogok"
         alert.informativeText = """
             VoxBarber – hangfájl-szerkesztő macOS-re
-            Verzió 1.0
+            Verzió 1.1
 
             © 2026 VoxBarber. Minden jog fenntartva.
 

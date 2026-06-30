@@ -69,12 +69,17 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
     private weak var copyButton: NSButton?
     private weak var cutButton: NSButton?
     private weak var pasteButton: NSButton?
+    private weak var mixButton: NSButton?
 
     /// A stopper label – a lejátszási pozíciót mutatja HH:MM:SS.mmmm formában.
     private weak var timeLabel: NSTextField?
 
     /// A stopper frissítésért felelős timer.
     private var playbackTimer: Timer?
+
+    /// Ha nem nil, a lejátszás ennél a frame-nél automatikusan megáll
+    /// (kijelölt rész lejátszásához). A megálláskor nullázódik.
+    private var playbackStopFrame: Int?
 
     // MARK: – Hangadat
 
@@ -108,11 +113,42 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
     /// A megnyitott fájl URL-je (mentéshez).
     private(set) var fileURL: URL?
 
-    /// Egy jelölőpont a hangformán: egyedi azonosító, név és frame-pozíció.
+    /// Egy jelölőpont színe RGBA komponensekkel (perzisztálható, NSColor-független).
+    struct MarkerColor: Codable, Equatable {
+        var r: Double
+        var g: Double
+        var b: Double
+        var a: Double
+
+        init(r: Double, g: Double, b: Double, a: Double) {
+            self.r = r; self.g = g; self.b = b; self.a = a
+        }
+
+        /// NSColor-ból építi fel (sRGB komponensekkel).
+        init(_ ns: NSColor) {
+            let c = ns.usingColorSpace(.sRGB) ?? ns
+            self.r = Double(c.redComponent)
+            self.g = Double(c.greenComponent)
+            self.b = Double(c.blueComponent)
+            self.a = Double(c.alphaComponent)
+        }
+
+        /// Alapértelmezett hullámszín: RGB ≈ 64, 166, 255, 85% átlátszatlanság.
+        static let `default` = MarkerColor(r: 0.25, g: 0.65, b: 1.0, a: 0.85)
+
+        /// AppKit színné alakítja (sRGB).
+        var nsColor: NSColor {
+            NSColor(srgbRed: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: CGFloat(a))
+        }
+    }
+
+    /// Egy jelölőpont a hangformán: egyedi azonosító, név, frame-pozíció és szín.
+    /// A szín azt jelenti, hogy ettől a ponttól kezdve a hullámot ezzel rajzoljuk.
     struct AudioMarker: Identifiable {
         let id = UUID()
         var name: String
         var frame: Int
+        var color: MarkerColor = .default
     }
 
     /// A panel jelölőpontjai. Időrendben (frame szerint) tartjuk rendezve.
@@ -306,9 +342,11 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         let copyBtn  = makeToolbarButton(symbol: "doc.on.doc",        tooltip: "Másol",     action: #selector(copyTapped))
         let cutBtn   = makeToolbarButton(symbol: "scissors",          tooltip: "Kivág",     action: #selector(cutTapped))
         let pasteBtn = makeToolbarButton(symbol: "doc.on.clipboard",  tooltip: "Beilleszt", action: #selector(pasteTapped))
+        let mixBtn   = makeToolbarButton(symbol: "square.stack.3d.up", tooltip: "Összemosás", action: #selector(mixTapped))
         self.copyButton = copyBtn
         self.cutButton = cutBtn
         self.pasteButton = pasteBtn
+        self.mixButton = mixBtn
 
         // Jobb csoport: zoom + scroll vezérlők
         let followToggle = NSButton(title: "", target: self, action: #selector(followTapped))
@@ -360,7 +398,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         sep3.wantsLayer = true
         sep3.layer?.backgroundColor = NSColor(white: 0.35, alpha: 1.0).cgColor
 
-        for v in [playBtn, pauseBtn, stopBtn, jumpBtn, jumpToEndBtn, jumpTimeBtn, volIcon, volSlider, sep1, markerBtn, copyBtn, cutBtn, pasteBtn, sep2, followToggle, zoomInBtn, zoomOutBtn, scrollLeftBtn, scrollRightBtn, sep3, infoBtn] {
+        for v in [playBtn, pauseBtn, stopBtn, jumpBtn, jumpToEndBtn, jumpTimeBtn, volIcon, volSlider, sep1, markerBtn, copyBtn, cutBtn, pasteBtn, mixBtn, sep2, followToggle, zoomInBtn, zoomOutBtn, scrollLeftBtn, scrollRightBtn, sep3, infoBtn] {
             toolbar.addSubview(v)
         }
 
@@ -409,8 +447,11 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
             pasteBtn.leadingAnchor.constraint(equalTo: cutBtn.trailingAnchor, constant: 4),
             pasteBtn.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
 
+            mixBtn.leadingAnchor.constraint(equalTo: pasteBtn.trailingAnchor, constant: 4),
+            mixBtn.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
             // Elválasztó 2
-            sep2.leadingAnchor.constraint(equalTo: pasteBtn.trailingAnchor, constant: 12),
+            sep2.leadingAnchor.constraint(equalTo: mixBtn.trailingAnchor, constant: 12),
             sep2.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             sep2.widthAnchor.constraint(equalToConstant: 1),
             sep2.heightAnchor.constraint(equalToConstant: 22),
@@ -451,6 +492,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         copyButton?.isEnabled = hasSelection
         cutButton?.isEnabled = hasSelection
         pasteButton?.isEnabled = AudioClipboard.shared.hasContent
+        mixButton?.isEnabled = AudioClipboard.shared.hasContent
     }
 
     private func startObservingClipboardChanges() {
@@ -675,6 +717,18 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
     private func tickTimer() {
         let frame = AudioEngine.shared.currentPlaybackFrame()
 
+        // Kijelölt rész lejátszása: ha elértük a tartomány végét, megállunk ott.
+        if let stop = playbackStopFrame, frame >= stop {
+            stopPlaybackTimer()
+            if DocumentPanelView.playing === self { DocumentPanelView.playing = nil }
+            AudioEngine.shared.stop()
+            playbackStopFrame = nil
+            cursorFrame = stop
+            timeLabel?.stringValue = formatPlaybackTime(frame: stop)
+            waveformView?.setCursorFrame(stop)
+            return
+        }
+
         // A lejátszás elérte (vagy túllépte) a hangfájl végét: leállítjuk a stoppert
         // és a lejátszást, különben a timer a fájl vége után is tovább pörögne.
         if audioBuffer.frameCount > 0, frame >= audioBuffer.frameCount {
@@ -780,13 +834,49 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
 
     @objc private func playTapped() {
         DocumentPanelView.playing = self
+        playbackStopFrame = nil
         AudioEngine.shared.setVolume(volumeLevel)
         AudioEngine.shared.play(audioBuffer, fromFrame: cursorFrame, panelID: panelID)
         startPlaybackTimer()
     }
 
+    // MARK: – Lejátszás menü belépési pontok
+
+    /// Lejátszás a hangfájl elejétől (Lejátszás menü).
+    func playFromStartMenu() {
+        cursorFrame = 0
+        timeLabel?.stringValue = formatPlaybackTime(frame: 0)
+        waveformView?.setCursorFrame(0)
+        DocumentPanelView.playing = self
+        playbackStopFrame = nil
+        AudioEngine.shared.setVolume(volumeLevel)
+        AudioEngine.shared.play(audioBuffer, fromFrame: 0, panelID: panelID)
+        startPlaybackTimer()
+    }
+
+    /// Lejátszás a kijelölt ponttól, azaz a kurzor jelenlegi helyétől (Lejátszás menü).
+    func playFromCursorMenu() {
+        playTapped()
+    }
+
+    /// A kijelölt rész lejátszása: a kijelölés elejétől a végéig (Lejátszás menü).
+    func playSelectionMenu() {
+        guard let range = selectionRange else { return }
+        let start = max(0, min(audioBuffer.frameCount, range.start))
+        let end   = max(start, min(audioBuffer.frameCount, range.end))
+        cursorFrame = start
+        timeLabel?.stringValue = formatPlaybackTime(frame: start)
+        waveformView?.setCursorFrame(start)
+        DocumentPanelView.playing = self
+        playbackStopFrame = end
+        AudioEngine.shared.setVolume(volumeLevel)
+        AudioEngine.shared.play(audioBuffer, fromFrame: start, panelID: panelID)
+        startPlaybackTimer()
+    }
+
     @objc private func pauseTapped() {
         stopPlaybackTimer()
+        playbackStopFrame = nil
         cursorFrame = AudioEngine.shared.currentPlaybackFrame()
         timeLabel?.stringValue = formatPlaybackTime(frame: cursorFrame)
         waveformView?.setCursorFrame(cursorFrame)
@@ -796,6 +886,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
 
     @objc private func stopTapped() {
         stopPlaybackTimer()
+        playbackStopFrame = nil
         if DocumentPanelView.playing === self { DocumentPanelView.playing = nil }
         AudioEngine.shared.stop()
         cursorFrame = 0
@@ -1005,12 +1096,57 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         // ezért a kurzort a frissen beillesztett rész elején tartjuk.
         cursorFrame = wasEmptyBuffer ? insertionFrame : insertionFrame + clip.frameCount
         selectionRange = nil
+
+        // A beillesztési pont utáni hangtartalom clip.frameCount frame-mel eltolódik,
+        // ezért a meglévő, ezen a ponton vagy utána lévő jelölőpontokat is eltoljuk,
+        // hogy a hanganyaghoz képest ugyanott maradjanak, mint a beillesztés előtt.
+        for i in markers.indices where markers[i].frame >= insertionFrame {
+            markers[i].frame += clip.frameCount
+        }
+
+        // A beillesztett rész elejét és végét automatikusan megjelöljük.
+        let pasteStart = insertionFrame
+        let pasteEnd   = insertionFrame + clip.frameCount
+        addMarker(atFrame: pasteStart, name: "Beillesztés eleje")
+        addMarker(atFrame: pasteEnd,   name: "Beillesztés vége")
+
         waveformView?.setBuffer(audioBuffer, zoom: zoomLevel)
         rulerView?.configure(sampleRate: audioBuffer.sampleRate,
                              frameCount: audioBuffer.frameCount,
                              zoom: zoomLevel)
         waveformView?.setCursorFrame(cursorFrame)
         refreshMarkerOverlay()
+        rebuildMarkersWindowContent()
+    }
+
+    /// A vágólapon lévő hangrészletet a kurzorpozíciótól összemossa (mixeli) a
+    /// jelenlegi hanganyaggal – nem közbeékelődik, hanem a két jel összeadódik.
+    @objc func mixTapped() {
+        guard let clip = AudioClipboard.shared.peek() else { return }
+        let mixFrame = max(0, min(audioBuffer.frameCount, cursorFrame))
+        let wasEmptyBuffer = audioBuffer.frameCount == 0
+
+        audioBuffer = audioBuffer.mixing(clip, at: mixFrame)
+        // A mixelés megnövelheti a puffert, ha a beékelt anyag túlnyúlna a fájl
+        // végén; ekkor a túllógó részben már csak a beillesztett hang szól.
+        let mixEnd = min(audioBuffer.frameCount, mixFrame + clip.frameCount)
+        // Üres dokumentumba mixeléskor a kurzort a frissen beillesztett rész
+        // elején tartjuk, egyébként a mixelt rész végére visszük.
+        cursorFrame = wasEmptyBuffer ? mixFrame : mixEnd
+        selectionRange = nil
+
+        // A mixelt rész elejét és végét automatikusan megjelöljük. A mixelés nem
+        // tolja el a meglévő hanganyagot, így a többi jelölőpont a helyén marad.
+        addMarker(atFrame: mixFrame, name: "Összemosás eleje")
+        addMarker(atFrame: mixEnd, name: "Összemosás vége")
+
+        waveformView?.setBuffer(audioBuffer, zoom: zoomLevel)
+        rulerView?.configure(sampleRate: audioBuffer.sampleRate,
+                             frameCount: audioBuffer.frameCount,
+                             zoom: zoomLevel)
+        waveformView?.setCursorFrame(cursorFrame)
+        refreshMarkerOverlay()
+        rebuildMarkersWindowContent()
     }
 
     // MARK: – Jelölőpont akciók
@@ -1031,9 +1167,25 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         rebuildMarkersWindowContent()
     }
 
+    /// Jelölőpontot helyez el egy adott frame-pozícióra a megadott névvel.
+    /// Ha az adott frame-en már van jelölőpont, nem hoz létre duplikátumot.
+    /// A hívó felelős a hangform/lista frissítéséért.
+    private func addMarker(atFrame rawFrame: Int, name: String) {
+        let frame = max(0, min(audioBuffer.frameCount, rawFrame))
+        guard !markers.contains(where: { $0.frame == frame }) else { return }
+        markers.append(AudioMarker(name: name, frame: frame))
+        markers.sort { $0.frame < $1.frame }
+    }
+
     /// Frissíti a hangformán megjelenő jelölővonalakat.
     private func refreshMarkerOverlay() {
-        waveformView?.setMarkerFrames(markers.map(\.frame), names: markers.map(\.name))
+        waveformView?.setMarkerFrames(
+            markers.map(\.frame),
+            names: markers.map(\.name),
+            colors: markers.map {
+                (CGFloat($0.color.r), CGFloat($0.color.g), CGFloat($0.color.b), CGFloat($0.color.a))
+            }
+        )
     }
 
     /// Megnyitja (vagy előtérbe hozza) a jelölőpontok listáját tartalmazó ablakot.
@@ -1045,7 +1197,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         }
 
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 360),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 360),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: true
@@ -1108,6 +1260,17 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
                 nameField.identifier = NSUserInterfaceItemIdentifier(marker.id.uuidString)
                 nameField.widthAnchor.constraint(equalToConstant: 250).isActive = true
 
+                // Színválasztó: ettől a ponttól kezdve ezzel a színnel rajzoljuk a hullámot.
+                let colorWell = NSColorWell()
+                colorWell.translatesAutoresizingMaskIntoConstraints = false
+                colorWell.color = marker.color.nsColor
+                colorWell.target = self
+                colorWell.action = #selector(markerColorChanged(_:))
+                colorWell.identifier = NSUserInterfaceItemIdentifier(marker.id.uuidString)
+                colorWell.widthAnchor.constraint(equalToConstant: 36).isActive = true
+                colorWell.heightAnchor.constraint(equalToConstant: 22).isActive = true
+                colorWell.setContentHuggingPriority(.required, for: .horizontal)
+
                 // Törlés gomb
                 let delBtn = NSButton(title: "", target: self, action: #selector(deleteMarkerTapped(_:)))
                 delBtn.bezelStyle = .inline
@@ -1120,6 +1283,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
 
                 row.addArrangedSubview(timeLabel)
                 row.addArrangedSubview(nameField)
+                row.addArrangedSubview(colorWell)
                 row.addArrangedSubview(delBtn)
                 stack.addArrangedSubview(row)
             }
@@ -1148,14 +1312,17 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
             ])
         }
 
-        // Alsó gombsor: Mentés / Betöltés.
+        // Alsó gombsor: Mentés / Betöltés / Bezár.
         let saveBtn = NSButton(title: "Mentés…", target: self, action: #selector(saveMarkersTapped))
         saveBtn.bezelStyle = .rounded
         saveBtn.isEnabled = !markers.isEmpty
         let loadBtn = NSButton(title: "Betöltés…", target: self, action: #selector(loadMarkersTapped))
         loadBtn.bezelStyle = .rounded
+        let closeBtn = NSButton(title: "Bezár", target: self, action: #selector(closeMarkersWindowTapped))
+        closeBtn.bezelStyle = .rounded
+        closeBtn.keyEquivalent = "\u{1b}"   // Esc
 
-        let buttonBar = NSStackView(views: [loadBtn, NSView(), saveBtn])
+        let buttonBar = NSStackView(views: [loadBtn, saveBtn, NSView(), closeBtn])
         buttonBar.orientation = .horizontal
         buttonBar.spacing = 8
         buttonBar.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
@@ -1204,6 +1371,19 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         rebuildMarkersWindowContent()
     }
 
+    /// A színválasztó megváltozásakor frissíti a jelölőpont színét és a hullámot.
+    @objc private func markerColorChanged(_ sender: NSColorWell) {
+        guard let idString = sender.identifier?.rawValue,
+              let idx = markers.firstIndex(where: { $0.id.uuidString == idString }) else { return }
+        markers[idx].color = MarkerColor(sender.color)
+        refreshMarkerOverlay()
+    }
+
+    /// A "Bezár" gomb: bezárja a jelölőpontok listáját tartalmazó ablakot.
+    @objc private func closeMarkersWindowTapped() {
+        markersWindow?.close()
+    }
+
     // MARK: – Jelölőpont lista mentés / betöltés (VBM)
 
     /// A VBM (VoxBarber Maker) fájl szerializálható formátuma.
@@ -1216,6 +1396,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         struct Item: Codable {
             var name: String
             var frame: Int
+            var color: MarkerColor?
         }
     }
 
@@ -1276,7 +1457,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
             audioFileName: fileURL?.lastPathComponent,
             audioFilePath: fileURL?.path,
             sampleRate: audioBuffer.sampleRate,
-            markers: markers.map { MarkerFile.Item(name: $0.name, frame: $0.frame) }
+            markers: markers.map { MarkerFile.Item(name: $0.name, frame: $0.frame, color: $0.color) }
         )
         do {
             let encoder = JSONEncoder()
@@ -1295,7 +1476,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         do {
             let data = try Data(contentsOf: url)
             let file = try JSONDecoder().decode(MarkerFile.self, from: data)
-            loaded = file.markers.map { AudioMarker(name: $0.name, frame: $0.frame) }
+            loaded = file.markers.map { AudioMarker(name: $0.name, frame: $0.frame, color: $0.color ?? .default) }
         } catch {
             presentMarkerError("A jelölőpontok betöltése nem sikerült.", error)
             return

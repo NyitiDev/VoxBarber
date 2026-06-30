@@ -18,7 +18,7 @@ set -euo pipefail
 
 APP_NAME="VoxBarber"
 BUNDLE_ID="dev.nyitrai.voxbarber"
-VERSION="1.0"
+VERSION="1.1"
 MIN_MACOS="12.0"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
