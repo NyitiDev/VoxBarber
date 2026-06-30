@@ -38,6 +38,26 @@ final class TimeRulerView: NSView {
         needsDisplay = true
     }
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerThemeObserver()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerThemeObserver()
+    }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    private func registerThemeObserver() {
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(themeColorsChanged),
+            name: ThemeManager.changedNotification, object: nil)
+    }
+
+    @objc private func themeColorsChanged() { needsDisplay = true }
+
     func setScrollOffset(_ sec: Double) {
         scrollOffset = sec
         needsDisplay = true
@@ -53,8 +73,8 @@ final class TimeRulerView: NSView {
 
         let w = Double(bounds.width)
 
-        // Háttér
-        ctx.setFillColor(CGColor(red: 0.11, green: 0.11, blue: 0.13, alpha: 1.0))
+        // Háttér (téma szerint)
+        ctx.setFillColor(ThemeManager.shared.colors.background.cgColor)
         ctx.fill(bounds)
 
         // Felső elválasztó
@@ -80,7 +100,7 @@ final class TimeRulerView: NSView {
 
         let attrs: [NSAttributedString.Key: Any] = [
             .font:            NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular),
-            .foregroundColor: NSColor(white: 0.55, alpha: 1.0)
+            .foregroundColor: ThemeManager.shared.colors.label.nsColor
         ]
 
         // Csak a látható tartományban lévő tick-ektől számoljuk

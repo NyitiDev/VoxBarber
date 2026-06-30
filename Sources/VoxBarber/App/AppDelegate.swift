@@ -15,6 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// A „VoxBarber használata” súgóablak vezérlője.
     private var helpWindowController: HelpWindowController?
 
+    /// A „Színek beállítása” ablak vezérlője.
+    private var colorSettingsController: ColorSettingsWindowController?
+
     /// A főablak vezérlője – a splash bezárása után jön létre.
     var mainWindowController: MainWindowController?
 
@@ -119,19 +122,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             title: "Összemos",
             action: #selector(mixAudio),
             keyEquivalent: ""))
-        editMenu.addItem(NSMenuItem(
-            title: "Töröl",
-            action: #selector(deleteAudio),
-            keyEquivalent: ""))
         editMenu.addItem(.separator())
         editMenu.addItem(NSMenuItem(
             title: "Új jelölőpont",
             action: #selector(addMarker),
             keyEquivalent: "m"))
         editMenu.addItem(NSMenuItem(
+            title: "Kijelölt rész megjelölése",
+            action: #selector(markSelection),
+            keyEquivalent: "r"))
+        editMenu.addItem(NSMenuItem(
             title: "Jelölőpontok listája",
             action: #selector(showMarkersList),
-            keyEquivalent: ""))
+            keyEquivalent: "l"))
 
         // ── Lejátszás menü ───────────────────────────────────────────────
         let playMenuItem = NSMenuItem()
@@ -150,6 +153,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         playMenu.addItem(NSMenuItem(
             title: "Lejátszás a kijelölt ponttól",
             action: #selector(playFromCursor),
+            keyEquivalent: ""))
+        playMenu.addItem(.separator())
+        playMenu.addItem(NSMenuItem(
+            title: "Lejátszás követése",
+            action: #selector(toggleFollowPlayback),
             keyEquivalent: ""))
 
         // ── Nézet menü ───────────────────────────────────────────────────
@@ -178,6 +186,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         viewMenu.addItem(NSMenuItem(
             title: "Ablak elrendezés betöltése",
             action: #selector(loadWindowLayout),
+            keyEquivalent: ""))
+        viewMenu.addItem(.separator())
+        viewMenu.addItem(NSMenuItem(
+            title: "Színek beállítása…",
+            action: #selector(showColorSettings),
             keyEquivalent: ""))
 
         // ── Segítség menü ────────────────────────────────────────────────
@@ -256,15 +269,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             chosenBitrate = bitrate
         }
 
+        // WAV esetén a felhasználó megadhatja a mintavételi frekvenciát.
+        var chosenSampleRate: Double? = nil
+        if chosenFormat == .wav {
+            guard let rate = askWAVSampleRate(default: panel.audioBuffer.sampleRate) else { return }
+            chosenSampleRate = rate
+        }
+
         // Célfájl kiválasztása
         let savePanel = NSSavePanel()
         savePanel.title = "Hangfájl mentése"
-        savePanel.allowedContentTypes = []
-        savePanel.nameFieldStringValue = (panel.fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled") + "." + chosenFormat.fileExtension
-        guard savePanel.runModal() == .OK, let url = savePanel.url else { return }
+        // A választott formátum UTType-ja garantálja a helyes kiterjesztést,
+        // különben kiterjesztés nélküli fájl keletkezhet, amit a megnyitó panel
+        // nem enged visszatölteni.
+        savePanel.allowedContentTypes = [chosenFormat.utType]
+        savePanel.canCreateDirectories = true
+        let baseName = panel.fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled"
+        savePanel.nameFieldStringValue = baseName + "." + chosenFormat.fileExtension
+        guard savePanel.runModal() == .OK, var url = savePanel.url else { return }
+
+        // Biztosítjuk, hogy a fájl a formátumnak megfelelő kiterjesztést kapja.
+        if url.pathExtension.lowercased() != chosenFormat.fileExtension {
+            url.deletePathExtension()
+            url.appendPathExtension(chosenFormat.fileExtension)
+        }
 
         do {
-            try AudioEngine.shared.save(panel.audioBuffer, to: url, format: chosenFormat, bitrate: chosenBitrate)
+            try AudioEngine.shared.save(panel.audioBuffer, to: url, format: chosenFormat, bitrate: chosenBitrate, sampleRate: chosenSampleRate)
         } catch {
             let errAlert = NSAlert()
             errAlert.messageText = "Mentési hiba"
@@ -295,6 +326,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return options[selected]
     }
 
+    /// WAV mintavételi frekvencia-választó dialógus. A választott értéket Hz-ben
+    /// adja vissza, vagy `nil`-t, ha a felhasználó megszakította.
+    /// A felkínált listában az eredeti (puffer szerinti) frekvencia is szerepel,
+    /// és alapból az van kiválasztva.
+    private func askWAVSampleRate(default current: Double) -> Double? {
+        var options: [Int] = [8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 192000]
+        let currentInt = Int(current.rounded())
+        if currentInt > 0, !options.contains(currentInt) {
+            options.append(currentInt)
+        }
+        options.sort()
+
+        let alert = NSAlert()
+        alert.messageText = "WAV mintavételi frekvencia"
+        alert.informativeText = "Válassza ki a kívánt mintavételi frekvenciát (Hz):"
+
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 160, height: 26))
+        popup.addItems(withTitles: options.map { "\($0) Hz" })
+        if currentInt > 0 {
+            popup.selectItem(withTitle: "\(currentInt) Hz")
+        } else {
+            popup.selectItem(withTitle: "44100 Hz")
+        }
+        alert.accessoryView = popup
+
+        alert.addButton(withTitle: "Mentés")
+        alert.addButton(withTitle: "Mégse")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let selected = popup.indexOfSelectedItem
+        guard selected >= 0, selected < options.count else { return current }
+        return Double(options[selected])
+    }
+
     // ── Lejátszás akciók ─────────────────────────────────────────────────
 
     @objc private func playFromStart() {
@@ -305,6 +370,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     @objc private func playFromCursor() {
         DocumentPanelView.focused?.playFromCursorMenu()
+    }
+    @objc private func toggleFollowPlayback() {
+        DocumentPanelView.focused?.toggleFollowPlayback()
     }
 
     // ── Szerkesztés akciók ────────────────────────────────────────────────
@@ -329,6 +397,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     @objc private func addMarker() {
         DocumentPanelView.focused?.addMarkerAtCursor()
+    }
+    @objc private func markSelection() {
+        DocumentPanelView.focused?.markSelectionEnds()
     }
     @objc private func showMarkersList() {
         DocumentPanelView.focused?.showMarkersList()
@@ -367,6 +438,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return hasPanel && AudioClipboard.shared.hasContent
         case #selector(addMarker):
             return hasPanel
+        case #selector(markSelection):
+            return hasSelection
         case #selector(showMarkersList):
             return hasPanel
 
@@ -375,6 +448,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return hasPanel
         case #selector(playSelection):
             return hasSelection
+        case #selector(toggleFollowPlayback):
+            menuItem.state = (panel?.isFollowingPlayback ?? false) ? .on : .off
+            return hasPanel
 
         // Nézet – elrendezések
         case #selector(arrangeWindowsHorizontal), #selector(arrangeWindowsGrid), #selector(arrangeWindowsTabbed):
@@ -409,6 +485,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc private func loadWindowLayout() {
         mainWindowController?.workspaceView.loadLayout()
+    }
+
+    @objc private func showColorSettings() {
+        if colorSettingsController == nil {
+            colorSettingsController = ColorSettingsWindowController()
+        }
+        colorSettingsController?.showWindow(nil)
+        colorSettingsController?.window?.makeKeyAndOrderFront(nil)
     }
 
     // ── Segítség akciók ───────────────────────────────────────────────────

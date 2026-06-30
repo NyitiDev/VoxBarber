@@ -54,6 +54,35 @@ final class WaveformView: NSView {
     /// Scroll-esemény értesítő: az új offset másodpercben.
     var onScrollOffsetChanged: ((Double) -> Void)?
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(themeColorsChanged),
+            name: ThemeManager.changedNotification,
+            object: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(themeColorsChanged),
+            name: ThemeManager.changedNotification,
+            object: nil)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    /// A téma színeinek megváltozásakor újrarendereljük a hullámot és frissítjük
+    /// az overlay-eket (kijelölés, jelölők, feliratok).
+    @objc private func themeColorsChanged() {
+        scheduleRender()
+        needsDisplay = true
+    }
+
     /// Kattintás-esemény értesítő: a kattintott pozíció frame-ben.
     /// Csak akkor hívódik, ha a felhasználó kattintott (nem húzott).
     var onSeek: ((Int) -> Void)?
@@ -183,8 +212,8 @@ final class WaveformView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        // Háttér
-        ctx.setFillColor(CGColor(red: 0.09, green: 0.09, blue: 0.11, alpha: 1.0))
+        // Háttér (téma szerint)
+        ctx.setFillColor(ThemeManager.shared.colors.background.cgColor)
         ctx.fill(bounds)
         if let img = cachedImage, let (_, visible, _) = totalAndVisible() {
             // Pixel-eltolás: a cached kép a cachedScrollOffset-re lett renderelve.
@@ -225,11 +254,39 @@ final class WaveformView: NSView {
         guard x1 > x0 else { return }
 
         let rect = CGRect(x: x0, y: 0, width: x1 - x0, height: bounds.height)
-        ctx.setFillColor(CGColor(red: 0.30, green: 0.58, blue: 1.0, alpha: 0.28))
+        let selColor = ThemeManager.shared.colors.selection
+        ctx.setFillColor(selColor.cgColor)
         ctx.fill(rect)
-        ctx.setStrokeColor(CGColor(red: 0.40, green: 0.70, blue: 1.0, alpha: 0.90))
+        ctx.setStrokeColor(CGColor(srgbRed: selColor.r, green: selColor.g, blue: selColor.b, alpha: min(1.0, selColor.a * 3.0 + 0.1)))
         ctx.setLineWidth(1.0)
         ctx.stroke(rect.insetBy(dx: 0.5, dy: 0.5))
+
+        // A kijelölés hossza HH:MM:SS.mmmm formában, a kijelölt rész bal felső
+        // sarkában (a nézet flipped, így y=0 felül van).
+        let durationLabel = WaveformView.formatDuration(frames: e - s, sampleRate: storedSampleRate)
+        let labelAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+            .foregroundColor: ThemeManager.shared.colors.label.nsColor
+        ]
+        let attr = NSAttributedString(string: durationLabel, attributes: labelAttrs)
+        let textSize = attr.size()
+        // Sötét háttér a jobb olvashatóságért.
+        let pad: CGFloat = 3
+        let bgRect = CGRect(x: x0 + 2, y: 2, width: textSize.width + pad * 2, height: textSize.height + pad)
+        ctx.setFillColor(CGColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.45))
+        ctx.fill(bgRect)
+        attr.draw(at: CGPoint(x: x0 + 2 + pad, y: 2 + pad / 2))
+    }
+
+    /// Frame-számot alakít HH:MM:SS.mmmm formátummá (mmmm = 0,1 ms pontosság).
+    private static func formatDuration(frames: Int, sampleRate: Double) -> String {
+        guard sampleRate > 0 else { return "00:00:00.0000" }
+        let totalSeconds = Double(frames) / sampleRate
+        let h = Int(totalSeconds) / 3600
+        let m = (Int(totalSeconds) % 3600) / 60
+        let s = Int(totalSeconds) % 60
+        let frac = Int((totalSeconds - Double(Int(totalSeconds))) * 10000.0)
+        return String(format: "%02d:%02d:%02d.%04d", h, m, s, frac)
     }
 
     /// Kirajzolja a jelölőpontokat feltűnő függőleges vonalakkal (a kurzortól
@@ -243,10 +300,10 @@ final class WaveformView: NSView {
 
         ctx.setStrokeColor(CGColor(red: 0.0, green: 0.95, blue: 0.55, alpha: 0.95))
         ctx.setLineWidth(2.0)
-        let markerColor = NSColor(red: 0.0, green: 0.95, blue: 0.55, alpha: 1.0)
+        let markerColor = ThemeManager.shared.colors.marker.nsColor
         let labelAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 9, weight: .medium),
-            .foregroundColor: markerColor
+            .foregroundColor: ThemeManager.shared.colors.label.nsColor
         ]
         for (index, frame) in markerFrames.enumerated() {
             let sec    = Double(frame) / storedSampleRate
@@ -259,7 +316,7 @@ final class WaveformView: NSView {
             ctx.addLine(to: CGPoint(x: x, y: bounds.height))
             ctx.strokePath()
 
-            // Név a vonal mellett, a hanghullám tetején, kicsi betűkkel.
+            // Név a vonal mellett, a hanghullám közepén, kicsi betűkkel.
             if index < markerNames.count {
                 let name = markerNames[index]
                 if !name.isEmpty {
@@ -270,7 +327,7 @@ final class WaveformView: NSView {
                     if textX + textSize.width > bounds.width {
                         textX = x - 3 - textSize.width
                     }
-                    let textY: CGFloat = 2  // felül (flipped koordináta)
+                    let textY = (bounds.height - textSize.height) / 2  // függőlegesen középen
                     attr.draw(at: CGPoint(x: textX, y: textY))
                 }
             }
@@ -316,6 +373,9 @@ final class WaveformView: NSView {
         let scrollOffset = scrollOffsetSec
         let sampleRate   = storedSampleRate
         let stops        = colorStops
+        let theme        = ThemeManager.shared.colors
+        let bg           = theme.background
+        let wf           = theme.waveform
 
         renderTask = Task.detached(priority: .userInitiated) {
             guard !Task.isCancelled else { return }
@@ -327,7 +387,9 @@ final class WaveformView: NSView {
                 scrollOffset: scrollOffset,
                 sampleRate: sampleRate,
                 size: size,
-                colorStops: stops
+                colorStops: stops,
+                background: bg,
+                waveform: wf
             )
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
@@ -532,7 +594,9 @@ final class WaveformView: NSView {
         scrollOffset: Double,
         sampleRate:   Double,
         size:         CGSize,
-        colorStops:   [WaveformColorStop]
+        colorStops:   [WaveformColorStop],
+        background:    RGBAColor,
+        waveform:     RGBAColor
     ) -> CGImage? {
         let w = Int(size.width)
         let h = Int(size.height)
@@ -548,8 +612,8 @@ final class WaveformView: NSView {
             bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
         ) else { return nil }
 
-        // Háttér
-        ctx.setFillColor(CGColor(red: 0.09, green: 0.09, blue: 0.11, alpha: 1.0))
+        // Háttér (téma szerint)
+        ctx.setFillColor(background.cgColor)
         ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
 
         // Közép-vonal
@@ -567,8 +631,8 @@ final class WaveformView: NSView {
         let visibleFrames    = Double(frameCount) / max(1.0, zoom)
         let framesPerPixel   = max(1.0, visibleFrames / Double(w))
 
-        // Alapértelmezett hullámszín (RGB ≈ 64, 166, 255), 85% átlátszatlanság.
-        let defR: CGFloat = 0.25, defG: CGFloat = 0.65, defB: CGFloat = 1.0, defA: CGFloat = 0.85
+        // Alapértelmezett hullámszín (téma szerint).
+        let defR = CGFloat(waveform.r), defG = CGFloat(waveform.g), defB = CGFloat(waveform.b), defA = CGFloat(waveform.a)
         // A színstopok frame szerint rendezettek; mivel a startFrame oszloponként
         // monoton nő, egy mutatóval végighaladhatunk rajtuk.
         var stopIdx = 0

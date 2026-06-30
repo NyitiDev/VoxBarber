@@ -65,6 +65,9 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
     /// A "követés" toggle gomb – lenyomva tartja a kurzort a látható ablakban.
     private weak var followBtn: NSButton?
 
+    /// A toolbar SF Symbol gombjai – a téma "gombok színe" alkalmazásához.
+    private var toolbarButtons: [NSButton] = []
+
     /// Szerkesztés toolbar gombok állapotkezeléshez.
     private weak var copyButton: NSButton?
     private weak var cutButton: NSButton?
@@ -189,6 +192,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         super.init(frame: frame)
         buildView(title: title)
         startObservingClipboardChanges()
+        startObservingThemeChanges()
         DocumentPanelView.allPanels.add(self)
         // Ha van fájl URL, betöltjük háttérben
         if let url = fileURL {
@@ -200,6 +204,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         super.init(coder: coder)
         buildView(title: "Ismeretlen")
         startObservingClipboardChanges()
+        startObservingThemeChanges()
         DocumentPanelView.allPanels.add(self)
     }
 
@@ -508,6 +513,28 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         updateEditingButtonsState()
     }
 
+    private func startObservingThemeChanges() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(themeColorsChanged),
+            name: ThemeManager.changedNotification,
+            object: nil
+        )
+    }
+
+    /// A téma színeinek megváltozásakor újraszínezzük a toolbar gombokat.
+    @objc private func themeColorsChanged() {
+        applyButtonTint()
+    }
+
+    /// A toolbar gombok ikonszínét a téma "gombok színe" értékére állítja.
+    private func applyButtonTint() {
+        let tint = ThemeManager.shared.colors.button.nsColor
+        for btn in toolbarButtons {
+            btn.contentTintColor = tint
+        }
+    }
+
     /// SF Symbol alapú toolbar gombot hoz létre.
     private func makeToolbarButton(symbol: String, tooltip: String, action: Selector) -> NSButton {
         let btn = NSButton(title: "", target: self, action: action)
@@ -515,6 +542,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         btn.bezelStyle = .rounded
         btn.toolTip    = tooltip
         btn.imagePosition = .imageOnly
+        btn.contentTintColor = ThemeManager.shared.colors.button.nsColor
 
         if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip) {
             btn.image = img
@@ -528,6 +556,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
             btn.widthAnchor.constraint(equalToConstant: 32),
             btn.heightAnchor.constraint(equalToConstant: 28)
         ])
+        toolbarButtons.append(btn)
         return btn
     }
 
@@ -1004,6 +1033,15 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         if let win = notification.object as? NSWindow, win === jumpTimeWindow {
             jumpTimeWindow = nil
         }
+        // A jelölőpontok listája bezárásakor minden onnan nyitott al-ablakot is
+        // bezárunk (a színválasztó panelt, amit a sor-színkutak nyitnak meg).
+        if let win = notification.object as? NSWindow, win === markersWindow {
+            let colorPanel = NSColorPanel.shared
+            if colorPanel.isVisible {
+                colorPanel.orderOut(nil)
+            }
+            markersWindow = nil
+        }
     }
 
     /// Feldolgozza az `óra.perc.másodperc.ezredmásodperc` formátumú időpontot
@@ -1123,10 +1161,16 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
     /// jelenlegi hanganyaggal – nem közbeékelődik, hanem a két jel összeadódik.
     @objc func mixTapped() {
         guard let clip = AudioClipboard.shared.peek() else { return }
+
+        // A két hangrészlet egymáshoz viszonyított hangerejének bekérése.
+        guard let gains = askMixGains() else { return }
+
         let mixFrame = max(0, min(audioBuffer.frameCount, cursorFrame))
         let wasEmptyBuffer = audioBuffer.frameCount == 0
 
-        audioBuffer = audioBuffer.mixing(clip, at: mixFrame)
+        audioBuffer = audioBuffer.mixing(clip, at: mixFrame,
+                                         existingGain: gains.existing,
+                                         incomingGain: gains.incoming)
         // A mixelés megnövelheti a puffert, ha a beékelt anyag túlnyúlna a fájl
         // végén; ekkor a túllógó részben már csak a beillesztett hang szól.
         let mixEnd = min(audioBuffer.frameCount, mixFrame + clip.frameCount)
@@ -1149,6 +1193,55 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         rebuildMarkersWindowContent()
     }
 
+    /// Bekéri a felhasználótól a két hangrészlet egymáshoz viszonyított hangerejét
+    /// összemosáskor. Egyetlen csúszka szabályozza az arányt: a csúszka eleje a
+    /// célfájl, a vége a beillesztendő hang. A csúszka felett bal és jobb oldalon
+    /// a két százalékos arány látható, melyek összege mindig 100%.
+    /// Nil = a felhasználó megszakította.
+    private func askMixGains() -> (existing: Float, incoming: Float)? {
+        let alert = NSAlert()
+        alert.messageText = "Összemosás aránya"
+        alert.informativeText = "Állítsd be a két hangrészlet egymáshoz viszonyított hangerejét."
+
+        let width: CGFloat = 320
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 56))
+
+        // Bal oldali (célfájl) és jobb oldali (beillesztett) százalék-címkék.
+        let existingLabel = NSTextField(labelWithString: "Célfájl: 50%")
+        existingLabel.frame = NSRect(x: 0, y: 32, width: width / 2, height: 20)
+        existingLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        existingLabel.alignment = .left
+
+        let incomingLabel = NSTextField(labelWithString: "Beillesztendő: 50%")
+        incomingLabel.frame = NSRect(x: width / 2, y: 32, width: width / 2, height: 20)
+        incomingLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        incomingLabel.alignment = .right
+
+        // A csúszka értéke = a célfájl hang aránya (0–100%). 50% = kiegyenlített.
+        // A csúszka elején (0%) a célfájl néma, a beillesztendő 100%-on szól.
+        let slider = NSSlider(value: 50, minValue: 0, maxValue: 100, target: nil, action: nil)
+        slider.frame = NSRect(x: 0, y: 4, width: width, height: 22)
+
+        accessory.addSubview(existingLabel)
+        accessory.addSubview(incomingLabel)
+        accessory.addSubview(slider)
+
+        // A %-címkék élő frissítése a csúszka mozgatásakor.
+        let updater = MixRatioSliderUpdater(slider: slider,
+                                            existingLabel: existingLabel,
+                                            incomingLabel: incomingLabel)
+        slider.target = updater
+        slider.action = #selector(MixRatioSliderUpdater.sliderChanged(_:))
+
+        alert.accessoryView = accessory
+        alert.addButton(withTitle: "Összemos")
+        alert.addButton(withTitle: "Mégse")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let existingRatio = Float(slider.doubleValue / 100.0)
+        return (existing: existingRatio, incoming: 1.0 - existingRatio)
+    }
+
     // MARK: – Jelölőpont akciók
 
     /// Igaz, ha a panelnek van legalább egy jelölőpontja.
@@ -1163,6 +1256,18 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         let name  = "Jelölő \(markers.count + 1)"
         markers.append(AudioMarker(name: name, frame: frame))
         markers.sort { $0.frame < $1.frame }
+        refreshMarkerOverlay()
+        rebuildMarkersWindowContent()
+    }
+
+    /// Ha van kijelölt tartomány, jelölőpontot helyez el a kijelölés elejére és
+    /// a végére is.
+    func markSelectionEnds() {
+        guard let range = selectionRange else { return }
+        let start = min(range.start, range.end)
+        let end   = max(range.start, range.end)
+        addMarker(atFrame: start, name: "Kijelölés eleje")
+        addMarker(atFrame: end,   name: "Kijelölés vége")
         refreshMarkerOverlay()
         rebuildMarkersWindowContent()
     }
@@ -1205,6 +1310,7 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         win.title = "Jelölőpontok"
         win.isReleasedWhenClosed = false
         win.level = .floating
+        win.delegate = self
         markersWindow = win
         rebuildMarkersWindowContent()
         win.center()
@@ -1614,6 +1720,16 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
         followBtn?.layer?.backgroundColor = bg
     }
 
+    /// A lejátszás-követés jelenlegi állapota (a menü pipa megjelenítéséhez).
+    var isFollowingPlayback: Bool { followPlayback }
+
+    /// Átkapcsolja a lejátszás-követést – a gyerek-ablak "követés" gombjával
+    /// azonos viselkedés. A toolbar gomb állapotát is szinkronizálja.
+    func toggleFollowPlayback() {
+        followBtn?.state = followPlayback ? .off : .on
+        followTapped()
+    }
+
     // MARK: – Info akció
 
     @objc func infoTapped() {
@@ -1791,6 +1907,31 @@ final class DocumentPanelView: NSView, NSTextFieldDelegate, NSWindowDelegate {
                 }
             }
         }
+    }
+}
+
+// MARK: – Összemosás arány-csúszka frissítő
+
+/// A „Összemosás aránya” párbeszéd egyetlen csúszkájának élő %-kijelzéséért felel.
+/// A csúszka értéke a célfájl hang aránya; a beillesztendő aránya az ehhez tartozó
+/// kiegészítő érték (a kettő összege mindig 100%).
+@MainActor
+private final class MixRatioSliderUpdater: NSObject {
+    private let slider: NSSlider
+    private let existingLabel: NSTextField
+    private let incomingLabel: NSTextField
+
+    init(slider: NSSlider, existingLabel: NSTextField, incomingLabel: NSTextField) {
+        self.slider = slider
+        self.existingLabel = existingLabel
+        self.incomingLabel = incomingLabel
+    }
+
+    @objc func sliderChanged(_ sender: NSSlider) {
+        let existing = Int(sender.doubleValue.rounded())
+        let incoming = 100 - existing
+        existingLabel.stringValue = "Célfájl: \(existing)%"
+        incomingLabel.stringValue = "Beillesztendő: \(incoming)%"
     }
 }
 

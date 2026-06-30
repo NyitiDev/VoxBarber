@@ -105,7 +105,14 @@ public final class AudioBuffer {
     /// megnövekszik: a túllógó részben már csak az `other` anyaga szól (az addigi
     /// hanganyagot csenddel egészítjük ki). A csúcsok túlcsordulása ellen az
     /// eredmény -1.0 … 1.0 tartományra van vágva (clamp).
-    public func mixing(_ other: AudioBuffer, at atFrame: Int) -> AudioBuffer {
+    ///
+    /// - Parameters:
+    ///   - existingGain: a meglévő (cél) hanganyag erősítése a keverésnél (0.0 – 1.0+).
+    ///   - incomingGain: a beékelt (`other`) hanganyag erősítése a keverésnél (0.0 – 1.0+).
+    public func mixing(_ other: AudioBuffer,
+                       at atFrame: Int,
+                       existingGain: Float = 1.0,
+                       incomingGain: Float = 1.0) -> AudioBuffer {
         // Az `other` puffert a jelenlegi csatornaszámra igazítjuk.
         let sourceSamples: [Float]
         if other.channelCount == channelCount {
@@ -125,6 +132,15 @@ public final class AudioBuffer {
 
         let mixStart = max(0, min(frameCount, atFrame)) * channelCount
         var newSamples = samples
+        // A meglévő hanganyagot a keverés tartományában a megadott erősítéssel skálázzuk.
+        if existingGain != 1.0 {
+            let scaleEnd = min(newSamples.count, mixStart + sourceSamples.count)
+            if scaleEnd > mixStart {
+                for i in mixStart..<scaleEnd {
+                    newSamples[i] *= existingGain
+                }
+            }
+        }
         // Ha a beékelt anyag túlnyúlik a jelenlegi puffer végén, megnöveljük a
         // puffert csenddel (0.0), hogy a túllógó rész is elférjen.
         let requiredCount = mixStart + sourceSamples.count
@@ -133,7 +149,7 @@ public final class AudioBuffer {
         }
         for i in 0..<sourceSamples.count {
             let dst = mixStart + i
-            let summed = newSamples[dst] + sourceSamples[i]
+            let summed = newSamples[dst] + sourceSamples[i] * incomingGain
             newSamples[dst] = min(1.0, max(-1.0, summed))
         }
         return AudioBuffer(samples: newSamples, channelCount: channelCount, sampleRate: sampleRate)
